@@ -1,7 +1,22 @@
-# ADR-004: Testing Strategy
+---
+id: ADR-004
+kind: adr
+title: "Testing Strategy"
+status: draft
+date: 2026-05-17
+authors: []
+reviewers: []
+tags: []
+supersedes: []
+superseded_by: []
+depends_on: []
+blocks: []
+implements: []
+related: []
+external: []
+project: pytest-linter
+---
 
-**Status:** Accepted  
-**Date:** 2026-05-17  
 **Deciders:** Jonathangadeaharder  
 
 ---

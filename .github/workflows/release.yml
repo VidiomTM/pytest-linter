@@ -19,19 +19,19 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ["self-hosted", "rust", "macos"]
             artifact_name: pytest-linter
             asset_name: pytest-linter-x86_64-unknown-linux-gnu
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ["self-hosted", "rust", "macos"]
             artifact_name: pytest-linter
             asset_name: pytest-linter-aarch64-unknown-linux-gnu
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: ["self-hosted", "rust", "macos"]
             artifact_name: pytest-linter
             asset_name: pytest-linter-x86_64-apple-darwin
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: ["self-hosted", "rust", "macos"]
             artifact_name: pytest-linter
             asset_name: pytest-linter-aarch64-apple-darwin
           - target: x86_64-pc-windows-msvc
@@ -87,7 +87,7 @@ jobs:
 
   build-python-wrapper:
     name: Build PyPI package
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "rust", "macos"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -115,7 +115,7 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [build-binaries, build-python-wrapper]
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "rust", "macos"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -149,7 +149,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "rust", "macos"]
     environment:
       name: pypi
       url: https://pypi.org/project/pytest-linter/

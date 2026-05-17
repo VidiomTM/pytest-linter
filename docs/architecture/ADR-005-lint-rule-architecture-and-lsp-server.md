@@ -1,7 +1,22 @@
-# ADR-005: Lint Rule Architecture + LSP Server Design
+---
+id: ADR-005
+kind: adr
+title: "Lint Rule Architecture + LSP Server Design"
+status: draft
+date: 2026-05-17
+authors: []
+reviewers: []
+tags: []
+supersedes: []
+superseded_by: []
+depends_on: []
+blocks: []
+implements: []
+related: []
+external: []
+project: pytest-linter
+---
 
-**Status:** Accepted  
-**Date:** 2026-05-17  
 **Deciders:** Jonathangadeaharder  
 
 ---

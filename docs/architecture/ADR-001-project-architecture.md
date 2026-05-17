@@ -1,7 +1,22 @@
-# ADR-001: Project Architecture
+---
+id: ADR-001
+kind: adr
+title: "Project Architecture"
+status: draft
+date: 2026-05-17
+authors: []
+reviewers: []
+tags: []
+supersedes: []
+superseded_by: []
+depends_on: []
+blocks: []
+implements: []
+related: []
+external: []
+project: pytest-linter
+---
 
-**Status:** Accepted  
-**Date:** 2026-05-17  
 **Deciders:** Jonathangadeaharder  
 
 ---

@@ -19,7 +19,7 @@ permissions:
 jobs:
   mutants:
     name: Mutation Testing
-    runs-on: self-hosted
+    runs-on: ["self-hosted", "rust", "macos"]
     steps:
       - uses: actions/checkout@v4
         with:

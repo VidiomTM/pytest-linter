@@ -1,7 +1,22 @@
-# ADR-002: Toolchain
+---
+id: ADR-002
+kind: adr
+title: "Toolchain"
+status: draft
+date: 2026-05-17
+authors: []
+reviewers: []
+tags: []
+supersedes: []
+superseded_by: []
+depends_on: []
+blocks: []
+implements: []
+related: []
+external: []
+project: pytest-linter
+---
 
-**Status:** Accepted  
-**Date:** 2026-05-17  
 **Deciders:** Jonathangadeaharder  
 
 ---
