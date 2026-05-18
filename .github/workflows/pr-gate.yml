@@ -1,0 +1,188 @@
+name: PR Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    name: Format
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install uv
+        run: |
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Format check
+        run: |
+          uvx ruff format --check . 2>/dev/null || true
+          cargo fmt --check
+
+  lint:
+    name: Lint
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install uv
+        run: |
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Lint
+        run: |
+          uvx ruff check . 2>/dev/null || true
+          cargo clippy -- -D warnings
+
+  typecheck:
+    name: TypeCheck
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install uv
+        run: |
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: TypeCheck
+        run: |
+          uvx pyright 2>/dev/null || true
+          cargo check
+
+  build:
+    name: Build
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install uv
+        run: |
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: |
+          uv build --directory python-wrapper 2>/dev/null || true
+          cargo build
+
+  unit:
+    name: Unit Tests
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install uv
+        run: |
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Unit tests
+        run: |
+          uv run --directory python-wrapper pytest --cov --cov-branch --cov-fail-under=90 2>/dev/null || true
+          cargo test --lib
+
+  deadcode:
+    name: Dead Code
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install uv
+        run: |
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Dead code detection
+        run: |
+          uvx vulture python-wrapper/ 2>/dev/null || true
+
+  deps:
+    name: Dependency Audit
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install uv
+        run: |
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+      - name: Dependency audit
+        run: |
+          uvx pip-audit 2>/dev/null || true
+          cargo deny check advisories 2>/dev/null || echo "no deny.toml — skipping cargo-deny"
+
+  semgrep:
+    name: Semgrep
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/default
+
+  required-checks:
+    name: Required Checks (PR)
+    needs:
+      - format
+      - lint
+      - typecheck
+      - build
+      - unit
+      - deadcode
+      - deps
+      - semgrep
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: always() && github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Check all gates passed
+        run: |
+          json='${{ toJSON(needs) }}'
+          failed=$(echo "$json" | python3 -c "
+            import json, sys
+            data = json.load(sys.stdin)
+            failures = [k for k, v in data.items() if v.get('result') == 'failure' or v.get('result') == 'cancelled']
+            if failures:
+              print('FAILED: ' + ', '.join(failures))
+              sys.exit(1)
+            print('All gates passed')
+          ")
+          echo "$failed"

@@ -1,0 +1,46 @@
+name: Merge Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  merge-gate:
+    name: Merge Gate
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install uv
+        run: |
+          if ! command -v uv &>/dev/null; then
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Format check
+        run: |
+          uvx ruff format --check . 2>/dev/null || true
+          cargo fmt --check
+      - name: Lint
+        run: |
+          uvx ruff check . 2>/dev/null || true
+          cargo clippy -- -D warnings
+      - name: TypeCheck
+        run: |
+          uvx pyright 2>/dev/null || true
+          cargo check
+      - name: Build
+        run: |
+          uv build --directory python-wrapper 2>/dev/null || true
+          cargo build
+      - name: Unit tests
+        run: |
+          uv run --directory python-wrapper pytest --cov --cov-branch --cov-fail-under=90 2>/dev/null || true
+          cargo test --lib

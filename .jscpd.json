@@ -1,0 +1,24 @@
+{
+  "minLines": 10,
+  "maxLines": 1000,
+  "maxSize": "100kb",
+  "minTokens": 50,
+  "threshold": 0.05,
+  "ignore": [
+    "target/**",
+    "benches/**",
+    "**/*.min.*",
+    "**/*.lock"
+  ],
+  "reporters": ["console", "html"],
+  "output": "reports/jscpd-report",
+  "mode": "strict",
+  "formats": {
+    "python": {
+      "literals": ["string", "comment"]
+    },
+    "rust": {
+      "literals": ["string", "comment"]
+    }
+  }
+}
