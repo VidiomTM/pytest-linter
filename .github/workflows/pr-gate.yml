@@ -30,12 +30,13 @@ jobs:
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - name: Setup stable Rust toolchain
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
+      - run: cargo +stable fmt --all -- --check
+      - run: cargo +stable clippy --workspace --all-targets -- -D warnings
+      - run: cargo +stable test --workspace
 
   dependency-scan:
     name: Dependency Scan
@@ -43,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked --version 0.18.6
+        run: brew install cargo-deny
       - name: Run cargo-deny
         run: cargo deny check
 
