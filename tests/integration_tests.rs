@@ -10,14 +10,14 @@ fn write_temp_file(dir: &std::path::Path, name: &str, content: &str) -> PathBuf 
     path
 }
 
-fn parse_file(path: &PathBuf) -> pytest_linter::models::ParsedModule {
+fn parse_file(path: &Path) -> pytest_linter::models::ParsedModule {
     let mut parser = PythonParser::new().unwrap();
     parser.parse_file(path).unwrap()
 }
 
-fn lint_single_file(path: &PathBuf) -> Vec<pytest_linter::models::Violation> {
+fn lint_single_file(path: &Path) -> Vec<pytest_linter::models::Violation> {
     let engine = LintEngine::new(Config::default()).unwrap();
-    engine.lint_paths(&[path.clone()]).unwrap()
+    engine.lint_paths(&[path.to_path_buf()]).unwrap()
 }
 
 fn find_violation<'a>(

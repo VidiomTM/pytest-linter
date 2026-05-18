@@ -1,0 +1,105 @@
+name: Required Checks (PR)
+
+on:
+  pull_request:
+    branches: [main, master]
+  merge_group:
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repo-hygiene:
+    name: Repository Hygiene
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required files exist
+        run: |
+          for f in Cargo.toml README.md LICENSE; do
+            if [ ! -f "$f" ]; then echo "Missing: $f"; exit 1; fi
+          done
+
+  rust-quality:
+    name: Rust Quality
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  dependency-scan:
+    name: Dependency Scan
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Run cargo-deny
+        run: cargo deny check
+
+  secret-scanning:
+    name: Secret Scanning
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: brew install gitleaks
+      - name: Run gitleaks
+        run: gitleaks detect --verbose --no-banner
+
+  structure:
+    name: Repository Structure
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build structurelint
+        run: |
+          git clone --depth 1 https://github.com/Jonathangadeaharder/structurelint.git /tmp/structurelint
+          cd /tmp/structurelint && go build -o /usr/local/bin/structurelint ./cmd/structurelint
+      - name: Run structurelint
+        run: structurelint .
+      - name: Cleanup structurelint build
+        if: always()
+        run: rm -rf /tmp/structurelint
+
+  cargo-test-lint:
+    name: Test Quality (Rust)
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-test-lint
+        run: cargo install cargo-test-lint
+      - name: Run cargo-test-lint
+        run: cargo test-lint
+
+  required-checks:
+    name: Required Checks (PR)
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    needs: [repo-hygiene, rust-quality, dependency-scan, secret-scanning, structure, cargo-test-lint]
+    if: always()
+    steps:
+      - name: Verify all checks passed
+        run: |
+          for JOB in ${{ join(needs.*.result, ' ') }}; do
+            if [ "$JOB" != "success" ] && [ "$JOB" != "skipped" ]; then
+              echo "❌ Job failed: $JOB"
+              exit 1
+            fi
+          done
+          echo "✅ All checks passed"

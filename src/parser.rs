@@ -1376,7 +1376,7 @@ impl PythonParser {
                     if let Some(first_char) = name.chars().next() {
                         if first_char.is_uppercase() {
                             // Check if it's a frozen dataclass
-                            let class_name = name.split('.').last().unwrap_or(&name);
+                            let class_name = name.split('.').next_back().unwrap_or(&name);
                             if frozen_classes.contains(class_name) {
                                 return false;
                             }
@@ -1772,12 +1772,12 @@ fn extract_patch_target(text: &str) -> Option<String> {
 
 fn extract_first_string_arg(text: &str) -> Option<String> {
     let trimmed = text.trim_start();
-    if trimmed.starts_with('"') {
-        let end = trimmed[1..].find('"')?;
-        Some(trimmed[1..1 + end].to_string())
-    } else if trimmed.starts_with('\'') {
-        let end = trimmed[1..].find('\'')?;
-        Some(trimmed[1..1 + end].to_string())
+    if let Some(stripped) = trimmed.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        Some(stripped[..end].to_string())
+    } else if let Some(stripped) = trimmed.strip_prefix('\'') {
+        let end = stripped.find('\'')?;
+        Some(stripped[..end].to_string())
     } else {
         None
     }
