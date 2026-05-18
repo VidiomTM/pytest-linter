@@ -28,12 +28,12 @@ jobs:
   rust-quality:
     name: Rust Quality
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    env:
+      PATH: /Users/jonathangadeaharder/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin
     steps:
       - uses: actions/checkout@v4
       - name: Setup stable Rust toolchain
         run: |
-          echo "/Users/jonathangadeaharder/.cargo/bin" >> "$GITHUB_PATH"
-          export PATH="/Users/jonathangadeaharder/.cargo/bin:$PATH"
           rustup default stable
           rustup component add rustfmt clippy
       - run: cargo +stable fmt --all -- --check
