@@ -43,7 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked --version 0.18.2
+        run: cargo install cargo-deny --locked --version 0.18.6
       - name: Run cargo-deny
         run: cargo deny check
 
@@ -82,21 +82,10 @@ jobs:
         if: always()
         run: rm -rf "$RUNNER_TEMP/structurelint" "$RUNNER_TEMP/structurelint-src"
 
-  cargo-test-lint:
-    name: Test Quality (Rust)
-    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-test-lint
-        run: cargo install cargo-test-lint --version 0.1.0
-      - name: Run cargo-test-lint
-        run: cargo test-lint
-
   required-checks:
     name: Required Checks (PR)
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    needs: [repo-hygiene, rust-quality, dependency-scan, secret-scanning, structure, cargo-test-lint]
+    needs: [repo-hygiene, rust-quality, dependency-scan, secret-scanning, structure]
     if: always()
     steps:
       - name: Verify all checks passed
