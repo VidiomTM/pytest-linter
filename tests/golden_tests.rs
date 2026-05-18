@@ -170,4 +170,3 @@ fn test_golden_inf_004_shutil_copy() {
 fn test_golden_val_001_inline_schema() {
     run_golden_test("val_001_inline_schema.py");
 }
-

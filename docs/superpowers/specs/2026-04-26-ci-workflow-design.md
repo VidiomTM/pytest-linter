@@ -1,7 +1,22 @@
-# Design: Rust CI Workflow for pytest-linter/vitest-linter
+---
+id: SPEC-CI-WORKFLOW-
+kind: spec
+title: "Design: Rust CI Workflow for pytest-linter/vitest-linter"
+status: draft
+authors: []
+reviewers: []
+tags: []
+supersedes: []
+superseded_by: []
+depends_on: []
+blocks: []
+implements: []
+related: []
+external: []
+project: pytest-linter
+---
 
 **Date:** 2026-04-26  
-**Status:** Approved  
 **Branch:** `feat/rust-rewrite`
 
 ## Summary
