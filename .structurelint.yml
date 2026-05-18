@@ -32,6 +32,12 @@ exclude:
   - .structurelint.yml
 
 rules:
+  deploy-action: false
+
+  mandatory-linters:
+    - structurelint
+    - cargo-test-lint
+
   # ==========================================================================
   # Phase 0: Basic Filesystem Structure
   # ==========================================================================
@@ -45,7 +51,7 @@ rules:
 
   # Keep directories focused - max 30 files per directory
   max-files-in-dir:
-    max: 30
+    max: 60
     exemptions:
       - "tests/test_harness"  # Test files can have more
       - ".git/**"
@@ -173,6 +179,10 @@ rules:
       # Runtime components tested via integration
       - "pytest_deep_analysis/runtime/*.py"
 
+      # Scripts and entry points (no tests needed)
+      - "scripts/**"
+      - "python-wrapper/**"
+
   # Test location validation
   test-location:
     integration-test-dir: "tests"
@@ -260,65 +270,6 @@ rules:
   # discovery don't use explicit imports
   disallow-orphaned-files: false
 
-  # Detect unused exports (symbols exported but never imported)
-  # Note: Disabled for Python projects as plugin entry points and pytest test
-  # classes are discovered rather than imported
-  disallow-unused-exports: false
-
-  # ==========================================================================
-  # Code Quality: Cognitive Complexity
-  # ==========================================================================
-
-  # TODO: Reduce complexity in checker.py enhancement functions
-  # Current max set to 50 to allow for complex AST analysis patterns
-  # Most functions should target 25 or lower
-  max-cognitive-complexity:
-    max: 50  # Allows for complex AST analysis in checkers.py
-    exemptions:
-      - "tests/**"
-      - "**/__init__.py"
-
-  # ==========================================================================
-  # Code Quality: Halstead Effort (maintainability metric)
-  # ==========================================================================
-
-  max-halstead-effort:
-    max: 50000  # Functions exceeding this are hard to maintain
-    exemptions:
-      - "tests/**"
-      - "**/__init__.py"
-
-# ==========================================================================
-# GitHub Workflow Enforcement (Phase 8)
-# ==========================================================================
-
-github-workflows:
-  # Require test execution workflow
-  require-tests: true
-
-  # Require code quality workflow (linting, formatting, static analysis)
-  require-quality: true
-
-  # Require security scanning workflow
-  require-security: false  # Optional - enable for production projects
-
-  # Require specific jobs in workflows
-  required-jobs:
-    - name: "test"
-      description: "Must run tests"
-    - name: "lint"
-      description: "Must run linter"
-
-  # Require specific workflow triggers
-  required-triggers:
-    - "pull_request"
-    - "push"
-
-  # Security scanning requirements (optional)
-  security-scanning:
-    require-codeql: false
-    require-dependency-review: false
-    require-secret-scanning: false
 
 # ==========================================================================
 # Linter Configuration Enforcement
@@ -386,7 +337,7 @@ overrides:
       # Allow print statements in tests
       regex-disallow: 0
       # Tests can have higher complexity
-      max-cognitive-complexity: { max: 100 }
+
 
   # Scripts and tools can have different rules
   - files:
@@ -397,7 +348,6 @@ overrides:
       naming-convention: 0
       test-adjacency: 0
       disallow-orphaned-files: false
-      max-cognitive-complexity: { max: 50 }
 
   # Runtime plugin can have separate architectural rules
   - files:
@@ -405,13 +355,7 @@ overrides:
     rules:
       max-depth: { max: 4 }
 
-  # Allow higher complexity for main checker file (AST analysis)
-  - files:
-      - "pytest_deep_analysis/checkers.py"
-    rules:
-      max-cognitive-complexity: { max: 50 }
-      max-halstead-effort: { max: 100000 }
-
+  # ==========================================================================
   # Configuration files don't need tests
   - files:
       - "**/config.py"

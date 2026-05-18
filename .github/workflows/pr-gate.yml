@@ -1,188 +1,102 @@
-name: PR Gate
+name: Required Checks (PR)
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main, master]
+  merge_group:
 
-permissions:
-  contents: read
+defaults:
+  run:
+    shell: bash
 
-env:
-  CARGO_TERM_COLOR: always
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  format:
-    name: Format
+  repo-hygiene:
+    name: Repository Hygiene
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: Install uv
+      - name: Check required files exist
         run: |
-          if ! command -v uv &>/dev/null; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: Format check
-        run: |
-          uvx ruff format --check . 2>/dev/null || true
-          cargo fmt --check
+          for f in Cargo.toml README.md LICENSE; do
+            if [ ! -f "$f" ]; then echo "Missing: $f"; exit 1; fi
+          done
 
-  lint:
-    name: Lint
+  rust-quality:
+    name: Rust Quality
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      PATH: /Users/jonathangadeaharder/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Install uv
+      - name: Setup stable Rust toolchain
         run: |
-          if ! command -v uv &>/dev/null; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: Lint
-        run: |
-          uvx ruff check . 2>/dev/null || true
-          cargo clippy -- -D warnings
+          rustup default stable
+          rustup component add rustfmt clippy
+      - run: cargo +stable fmt --all -- --check
+      - run: cargo +stable clippy --workspace --all-targets -- -D warnings
+      - run: cargo +stable test --workspace
 
-  typecheck:
-    name: TypeCheck
+  dependency-scan:
+    name: Dependency Scan
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install uv
-        run: |
-          if ! command -v uv &>/dev/null; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: TypeCheck
-        run: |
-          uvx pyright 2>/dev/null || true
-          cargo check
-
-  build:
-    name: Build
-    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install uv
-        run: |
-          if ! command -v uv &>/dev/null; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: Build
-        run: |
-          uv build --directory python-wrapper 2>/dev/null || true
-          cargo build
-
-  unit:
-    name: Unit Tests
-    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install uv
-        run: |
-          if ! command -v uv &>/dev/null; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: Unit tests
-        run: |
-          uv run --directory python-wrapper pytest --cov --cov-branch --cov-fail-under=90 2>/dev/null || true
-          cargo test --lib
-
-  deadcode:
-    name: Dead Code
-    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install uv
-        run: |
-          if ! command -v uv &>/dev/null; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - name: Dead code detection
-        run: |
-          uvx vulture python-wrapper/ 2>/dev/null || true
-
-  deps:
-    name: Dependency Audit
-    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install uv
-        run: |
-          if ! command -v uv &>/dev/null; then
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-          fi
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Install cargo-deny
-        uses: taiki-e/install-action@cargo-deny
-      - name: Dependency audit
-        run: |
-          uvx pip-audit 2>/dev/null || true
-          cargo deny check advisories 2>/dev/null || echo "no deny.toml — skipping cargo-deny"
+        run: brew install cargo-deny
+      - name: Run cargo-deny
+        run: cargo deny check
 
-  semgrep:
-    name: Semgrep
+  secret-scanning:
+    name: Secret Scanning
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v4
-      - uses: returntocorp/semgrep-action@v1
         with:
-          config: p/default
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.2/gitleaks_8.24.2_darwin_arm64.tar.gz \
+            | tar xz -C /usr/local/bin gitleaks
+          chmod +x /usr/local/bin/gitleaks
+      - name: Run gitleaks
+        run: gitleaks detect --verbose --no-banner
+
+  structure:
+    name: Repository Structure
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build structurelint
+        run: |
+          git clone --depth 1 https://github.com/Jonathangadeaharder/structurelint.git "$RUNNER_TEMP/structurelint-src"
+          cd "$RUNNER_TEMP/structurelint-src" && go build -o "$RUNNER_TEMP/structurelint" ./cmd/structurelint
+          chmod +x "$RUNNER_TEMP/structurelint"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Run structurelint
+        run: structurelint .
+      - name: Cleanup structurelint build
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/structurelint" "$RUNNER_TEMP/structurelint-src"
 
   required-checks:
     name: Required Checks (PR)
-    needs:
-      - format
-      - lint
-      - typecheck
-      - build
-      - unit
-      - deadcode
-      - deps
-      - semgrep
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    if: always() && github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    needs: [repo-hygiene, rust-quality, dependency-scan, secret-scanning, structure]
+    if: always()
     steps:
-      - name: Check all gates passed
+      - name: Verify all checks passed
         run: |
-          json='${{ toJSON(needs) }}'
-          failed=$(echo "$json" | python3 -c "
-            import json, sys
-            data = json.load(sys.stdin)
-            failures = [k for k, v in data.items() if v.get('result') == 'failure' or v.get('result') == 'cancelled']
-            if failures:
-              print('FAILED: ' + ', '.join(failures))
-              sys.exit(1)
-            print('All gates passed')
-          ")
-          echo "$failed"
+          for JOB in ${{ join(needs.*.result, ' ') }}; do
+            if [ "$JOB" != "success" ]; then
+              echo "❌ Job failed or was skipped: $JOB"
+              exit 1
+            fi
+          done
+          echo "✅ All required checks passed"

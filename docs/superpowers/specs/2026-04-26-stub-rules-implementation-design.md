@@ -1,7 +1,22 @@
-# Design: Implementing 8 Stub Rules via Parser Model Enrichment
+---
+id: SPEC-STUB-RULES-I
+kind: spec
+title: "Design: Implementing 8 Stub Rules via Parser Model Enrichment"
+status: draft
+authors: []
+reviewers: []
+tags: []
+supersedes: []
+superseded_by: []
+depends_on: []
+blocks: []
+implements: []
+related: []
+external: []
+project: pytest-linter
+---
 
 **Date:** 2026-04-26  
-**Status:** Approved  
 **Branch:** `feat/rust-rewrite`  
 **PR:** #11
 

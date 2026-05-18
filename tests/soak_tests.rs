@@ -26,7 +26,7 @@ fn soak_test_10k_files() {
     let violations = engine.lint_paths(&[soak_dir]).unwrap();
     let elapsed = start.elapsed();
 
-    let file_count = std::fs::read_dir(&get_soak_dir())
+    let file_count = std::fs::read_dir(get_soak_dir())
         .unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "py"))

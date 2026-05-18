@@ -1,7 +1,22 @@
-# SPEC: Core Rule Engine
+---
+id: SPEC-CORE-RULE-EN
+kind: spec
+title: "SPEC: Core Rule Engine"
+status: draft
+authors: []
+reviewers: []
+tags: []
+supersedes: []
+superseded_by: []
+depends_on: []
+blocks: []
+implements: []
+related: []
+external: []
+project: pytest-linter
+---
 
 **Date:** 2026-05-17  
-**Status:** Draft  
 
 ---
 

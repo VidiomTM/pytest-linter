@@ -430,9 +430,9 @@ mod tests {
                 severity: None,
             },
         );
-        assert_eq!(cfg.is_rule_enabled("UNKNOWN-001"), false);
-        assert_eq!(cfg.is_rule_enabled("PYTEST-FLK-001"), true);
-        assert_eq!(cfg.is_rule_enabled("SOME-NONEXISTENT"), true);
+        assert!(!cfg.is_rule_enabled("UNKNOWN-001"));
+        assert!(cfg.is_rule_enabled("PYTEST-FLK-001"));
+        assert!(cfg.is_rule_enabled("SOME-NONEXISTENT"));
     }
 
     #[test]
@@ -566,7 +566,7 @@ enabled = true
 
         let cfg = Config::discover(dir.path()).unwrap();
         assert_eq!(cfg.format, Some("json".to_string()));
-        assert_eq!(cfg.is_rule_enabled("PYTEST-FLK-001"), true);
+        assert!(cfg.is_rule_enabled("PYTEST-FLK-001"));
     }
 
     #[test]
@@ -607,7 +607,7 @@ format = "terminal"
         higher.format = Some("json".to_string());
 
         let merged = base.merge(higher);
-        assert_eq!(merged.is_rule_enabled("PYTEST-FLK-001"), false);
+        assert!(!merged.is_rule_enabled("PYTEST-FLK-001"));
         assert_eq!(merged.format, Some("json".to_string()));
     }
 
@@ -647,9 +647,8 @@ format = "json"
         );
         let higher = Config::default();
         let merged = base.merge(higher);
-        assert_eq!(
-            merged.is_rule_enabled("PYTEST-FLK-001"),
-            false,
+        assert!(
+            !merged.is_rule_enabled("PYTEST-FLK-001"),
             "default (None) should not override explicit Some(false)"
         );
     }
