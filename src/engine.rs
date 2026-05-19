@@ -442,19 +442,21 @@ pub fn is_fixture_used_by_any_test_or_fixture(
     false
 }
 
-/// Compute the transitive closure of fixture names used by tests.
-#[must_use]
-pub fn compute_used_fixture_names(modules: &[ParsedModule]) -> HashSet<String> {
-    let mut fixture_deps_map: HashMap<&str, Vec<&String>> = HashMap::new();
+/// Build a map from fixture name to its direct dependencies.
+fn build_fixture_deps_map(modules: &[ParsedModule]) -> HashMap<&str, Vec<&String>> {
+    let mut map = HashMap::new();
     for module in modules {
         for fixture in &module.fixtures {
-            fixture_deps_map.insert(&fixture.name, fixture.dependencies.iter().collect());
+            map.insert(fixture.name.as_str(), fixture.dependencies.iter().collect());
         }
     }
+    map
+}
 
+/// Seed the worklist with all fixture names directly referenced by tests.
+fn collect_direct_fixture_deps(modules: &[ParsedModule]) -> (HashSet<String>, Vec<String>) {
     let mut used = HashSet::new();
     let mut worklist = Vec::new();
-
     for module in modules {
         for test in &module.test_functions {
             for dep in &test.fixture_deps {
@@ -464,6 +466,14 @@ pub fn compute_used_fixture_names(modules: &[ParsedModule]) -> HashSet<String> {
             }
         }
     }
+    (used, worklist)
+}
+
+/// Compute the transitive closure of fixture names used by tests.
+#[must_use]
+pub fn compute_used_fixture_names(modules: &[ParsedModule]) -> HashSet<String> {
+    let fixture_deps_map = build_fixture_deps_map(modules);
+    let (mut used, mut worklist) = collect_direct_fixture_deps(modules);
 
     while let Some(name) = worklist.pop() {
         if let Some(deps) = fixture_deps_map.get(name.as_str()) {
