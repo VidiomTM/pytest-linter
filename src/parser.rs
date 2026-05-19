@@ -463,6 +463,37 @@ impl PythonParser {
         })
     }
 
+    fn is_magic_assertion(expr_node: tree_sitter::Node, source: &[u8], has_comparison: bool) -> bool {
+        let kind = expr_node.kind();
+        if kind == "true" || kind == "false" {
+            return true;
+        }
+        if kind == "integer" {
+            let text = Self::node_text(expr_node, source);
+            return text == "0" || text == "1";
+        }
+        !has_comparison && kind == "identifier"
+    }
+
+    fn build_assertion_info(
+        expr_node: tree_sitter::Node,
+        source: &[u8],
+        line: usize,
+    ) -> crate::models::AssertionInfo {
+        let expression_text = Self::node_text(expr_node, source);
+        let has_comparison =
+            Self::has_node_kind_recursive(expr_node, "comparison_operator");
+        let is_magic = Self::is_magic_assertion(expr_node, source, has_comparison);
+        let is_suboptimal = Self::is_suboptimal_assertion(expr_node, source);
+        crate::models::AssertionInfo {
+            is_magic,
+            is_suboptimal,
+            has_comparison,
+            expression_text,
+            line,
+        }
+    }
+
     fn collect_assertion_info(
         node: tree_sitter::Node,
         source: &[u8],
@@ -471,34 +502,12 @@ impl PythonParser {
         if node.kind() == "assert_statement" {
             let line = node.start_position().row + 1;
             let mut cursor = node.walk();
-            let expr_node = node.children(&mut cursor).find(|c| {
+            if let Some(expr_node) = node.children(&mut cursor).find(|c| {
                 let k = c.kind();
                 !k.starts_with(',') && k != "comment" && k != "assert"
-            });
-            let expression_text = expr_node
-                .map(|n| Self::node_text(n, source))
-                .unwrap_or_default();
-            let has_comparison =
-                expr_node.is_some_and(|n| Self::has_node_kind_recursive(n, "comparison_operator"));
-            let is_magic = expr_node.is_some_and(|n| {
-                let kind = n.kind();
-                if kind == "true" || kind == "false" {
-                    return true;
-                }
-                if kind == "integer" {
-                    let text = Self::node_text(n, source);
-                    return text == "0" || text == "1";
-                }
-                !has_comparison && kind == "identifier"
-            });
-            let is_suboptimal = expr_node.is_some_and(|n| Self::is_suboptimal_assertion(n, source));
-            infos.push(crate::models::AssertionInfo {
-                is_magic,
-                is_suboptimal,
-                has_comparison,
-                expression_text,
-                line,
-            });
+            }) {
+                infos.push(Self::build_assertion_info(expr_node, source, line));
+            }
             return;
         }
         let mut cursor = node.walk();
@@ -752,53 +761,114 @@ impl PythonParser {
         mutated
     }
 
+    fn handle_mut_call(
+        node: tree_sitter::Node,
+        source: &[u8],
+        fixture_deps: &[String],
+        mutated: &mut Vec<String>,
+    ) {
+        if node.kind() != "call" {
+            return;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return,
+        };
+        if func.kind() != "attribute" {
+            return;
+        }
+        let obj = func.child_by_field_name("object");
+        let attr = func.child_by_field_name("attribute");
+        let (Some(obj), Some(attr)) = (obj, attr) else { return };
+        let obj_name = Self::node_text(obj, source);
+        let method = Self::node_text(attr, source);
+        let mutating_methods = [
+            "append", "extend", "remove", "pop", "clear", "update", "insert", "add", "discard",
+        ];
+        if !mutating_methods.contains(&method.as_str()) {
+            return;
+        }
+        if fixture_deps.contains(&obj_name) || Self::is_fixture_chain(&obj, source, fixture_deps) {
+            mutated.push(Self::get_fixture_root(&obj, source, fixture_deps));
+        }
+    }
+
+    fn handle_mut_delete(
+        node: tree_sitter::Node,
+        source: &[u8],
+        fixture_deps: &[String],
+        mutated: &mut Vec<String>,
+    ) {
+        if node.kind() != "delete_statement" {
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            let text = Self::node_text(child, source).trim().to_string();
+            if fixture_deps.contains(&text) {
+                mutated.push(text);
+            }
+        }
+    }
+
     fn find_mutations(
         node: tree_sitter::Node,
         source: &[u8],
         fixture_deps: &[String],
         mutated: &mut Vec<String>,
     ) {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                if f.kind() == "attribute" {
-                    let obj = f.child_by_field_name("object");
-                    let attr = f.child_by_field_name("attribute");
-                    if let (Some(obj), Some(attr)) = (obj, attr) {
-                        let obj_name = Self::node_text(obj, source);
-                        let method = Self::node_text(attr, source);
-                        let mutating_methods = [
-                            "append", "extend", "remove", "pop", "clear", "update", "insert",
-                            "add", "discard",
-                        ];
-                        if mutating_methods.contains(&method.as_str())
-                            && (fixture_deps.contains(&obj_name)
-                                || Self::is_fixture_chain(&obj, source, fixture_deps))
-                        {
-                            mutated.push(Self::get_fixture_root(&obj, source, fixture_deps));
-                        }
-                    }
-                }
-            }
-        }
+        Self::handle_mut_call(node, source, fixture_deps, mutated);
         if node.kind() == "assignment" {
-            let target = node.child_by_field_name("left");
-            if let Some(t) = target {
+            if let Some(t) = node.child_by_field_name("left") {
                 Self::check_assignment_target(t, source, fixture_deps, mutated);
             }
         }
-        if node.kind() == "delete_statement" {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                let text = Self::node_text(child, source).trim().to_string();
-                if fixture_deps.contains(&text) {
-                    mutated.push(text);
-                }
-            }
-        }
+        Self::handle_mut_delete(node, source, fixture_deps, mutated);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             Self::find_mutations(child, source, fixture_deps, mutated);
+        }
+    }
+
+    fn push_if_fixture_dep(
+        name: &str,
+        node: &tree_sitter::Node,
+        source: &[u8],
+        fixture_deps: &[String],
+        mutated: &mut Vec<String>,
+    ) {
+        if fixture_deps.contains(&name.to_string()) {
+            mutated.push(name.to_string());
+        } else if Self::is_fixture_chain(node, source, fixture_deps) {
+            mutated.push(Self::get_fixture_root(node, source, fixture_deps));
+        }
+    }
+
+    fn check_subscript_target(
+        target: tree_sitter::Node,
+        source: &[u8],
+        fixture_deps: &[String],
+        mutated: &mut Vec<String>,
+    ) {
+        if target.kind() == "subscript" {
+            if let Some(v) = target.child_by_field_name("value") {
+                let name = Self::node_text(v, source);
+                Self::push_if_fixture_dep(&name, &v, source, fixture_deps, mutated);
+            }
+        }
+    }
+
+    fn check_attribute_target(
+        target: tree_sitter::Node,
+        source: &[u8],
+        fixture_deps: &[String],
+        mutated: &mut Vec<String>,
+    ) {
+        if target.kind() == "attribute" {
+            if let Some(o) = target.child_by_field_name("object") {
+                let name = Self::node_text(o, source);
+                Self::push_if_fixture_dep(&name, &o, source, fixture_deps, mutated);
+            }
         }
     }
 
@@ -808,28 +878,8 @@ impl PythonParser {
         fixture_deps: &[String],
         mutated: &mut Vec<String>,
     ) {
-        if target.kind() == "subscript" {
-            let value = target.child_by_field_name("value");
-            if let Some(v) = value {
-                let name = Self::node_text(v, source);
-                if fixture_deps.contains(&name) {
-                    mutated.push(name);
-                } else if Self::is_fixture_chain(&v, source, fixture_deps) {
-                    mutated.push(Self::get_fixture_root(&v, source, fixture_deps));
-                }
-            }
-        }
-        if target.kind() == "attribute" {
-            let obj = target.child_by_field_name("object");
-            if let Some(o) = obj {
-                let name = Self::node_text(o, source);
-                if fixture_deps.contains(&name) {
-                    mutated.push(name);
-                } else if Self::is_fixture_chain(&o, source, fixture_deps) {
-                    mutated.push(Self::get_fixture_root(&o, source, fixture_deps));
-                }
-            }
-        }
+        Self::check_subscript_target(target, source, fixture_deps, mutated);
+        Self::check_attribute_target(target, source, fixture_deps, mutated);
     }
 
     /// Check if an attribute chain's root is a fixture dependency.
@@ -1164,43 +1214,32 @@ impl PythonParser {
         max_val
     }
 
+    fn has_cleanup_text_patterns(body_text: &str) -> bool {
+        let patterns = [".close()", ".teardown_", "env_reset", ".restore()", ".cleanup()", ".remove()", ".unlink()"];
+        patterns.iter().any(|p| body_text.contains(p))
+    }
+
+    fn has_cleanup_addfinalizer(body_text: &str) -> bool {
+        body_text.contains("addfinalizer") || body_text.contains("request.addfinalizer")
+    }
+
+    fn has_cleanup_patch(body_text: &str) -> bool {
+        body_text.contains("mock.patch") || body_text.contains("patch(")
+    }
+
+    fn has_cleanup_tmp_path(body_text: &str) -> bool {
+        body_text.contains("tmp_path") || body_text.contains("tmpdir")
+    }
+
     fn detect_cleanup_pattern(body: Option<&tree_sitter::Node>, source: &[u8]) -> bool {
-        let cleanup_text_patterns = [
-            ".close()",
-            ".teardown_",
-            "env_reset",
-            ".restore()",
-            ".cleanup()",
-            ".remove()",
-            ".unlink()",
-        ];
         body.is_some_and(|b| {
             let text = String::from_utf8_lossy(&source[b.start_byte()..b.end_byte()]);
-
-            if cleanup_text_patterns.iter().any(|p| text.contains(p)) {
-                return true;
-            }
-
-            if text.contains("addfinalizer") || text.contains("request.addfinalizer") {
-                return true;
-            }
-
-            if text.contains("mock.patch") || text.contains("patch(") {
-                return true;
-            }
-
-            if text.contains("tmp_path") || text.contains("tmpdir") {
-                return true;
-            }
-
-            if Self::has_try_wrapping_yield(*b, source) {
-                return true;
-            }
-
-            if Self::has_with_wrapping_yield(*b, source) {
-                return true;
-            }
-
+            if Self::has_cleanup_text_patterns(&text) { return true; }
+            if Self::has_cleanup_addfinalizer(&text) { return true; }
+            if Self::has_cleanup_patch(&text) { return true; }
+            if Self::has_cleanup_tmp_path(&text) { return true; }
+            if Self::has_try_wrapping_yield(*b, source) { return true; }
+            if Self::has_with_wrapping_yield(*b, source) { return true; }
             false
         })
     }
@@ -1236,28 +1275,31 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_network_call(*b, source))
     }
 
-    fn has_network_call(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                let network_libs = ["requests", "socket", "httpx", "aiohttp", "urllib"];
-                if network_libs.iter().any(|lib| {
-                    text.starts_with(&format!("{}.", lib))
-                        || text.starts_with(&format!("{} (", lib))
-                }) {
-                    return true;
-                }
-                if f.kind() == "attribute" {
-                    let obj = f.child_by_field_name("object");
-                    if let Some(o) = obj {
-                        let obj_name = Self::node_text(o, source);
-                        if network_libs.contains(&obj_name.as_str()) {
-                            return true;
-                        }
-                    }
-                }
+    fn is_network_call_node(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let text = Self::node_text(func, source);
+        let network_libs = ["requests", "socket", "httpx", "aiohttp", "urllib"];
+        if network_libs.iter().any(|lib| text.starts_with(&format!("{}.", lib)) || text.starts_with(&format!("{} (", lib))) {
+            return true;
+        }
+        if let Some(o) = func.child_by_field_name("object") {
+            let obj_name = Self::node_text(o, source);
+            if network_libs.contains(&obj_name.as_str()) {
+                return true;
             }
+        }
+        false
+    }
+
+    fn has_network_call(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if Self::is_network_call_node(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1280,30 +1322,32 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_db_call(*b, source, "rollback"))
     }
 
-    fn has_db_call(node: tree_sitter::Node, source: &[u8], method_name: &str) -> bool {
+    fn is_db_call_node(node: tree_sitter::Node, source: &[u8], method_name: &str) -> bool {
         if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                if text.to_lowercase().contains(method_name) {
-                    return true;
-                }
-                if f.kind() == "attribute" {
-                    let attr = f.child_by_field_name("attribute");
-                    if let Some(a) = attr {
-                        let name = Self::node_text(a, source).to_lowercase();
-                        if name == method_name {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        if node.kind() == "identifier" {
-            let name = Self::node_text(node, source).to_lowercase();
-            if name == method_name {
+            let func = match node.child_by_field_name("function") {
+                Some(f) => f,
+                None => return false,
+            };
+            let text = Self::node_text(func, source);
+            if text.to_lowercase().contains(method_name) {
                 return true;
             }
+            if func.kind() == "attribute" {
+                if let Some(a) = func.child_by_field_name("attribute") {
+                    return Self::node_text(a, source).to_lowercase() == method_name;
+                }
+            }
+            return false;
+        }
+        if node.kind() == "identifier" {
+            return Self::node_text(node, source).to_lowercase() == method_name;
+        }
+        false
+    }
+
+    fn has_db_call(node: tree_sitter::Node, source: &[u8], method_name: &str) -> bool {
+        if Self::is_db_call_node(node, source, method_name) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1377,6 +1421,45 @@ impl PythonParser {
         false
     }
 
+    fn is_mutable_call_node(node: tree_sitter::Node, source: &[u8], frozen_classes: &HashSet<String>) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let name = Self::node_text(func, source);
+        let immutable = ["int", "str", "float", "bool", "bytes", "complex", "tuple",
+            "frozenset", "NoneType", "Path", "PurePath", "PurePosixPath", "PureWindowsPath",
+            "Decimal", "date", "datetime", "time", "timedelta", "UUID",
+            "ipaddress", "IPv4Address", "IPv6Address", "re.compile", "enum"];
+        if immutable.iter().any(|ic| name == *ic) {
+            return false;
+        }
+        let mutable = ["list", "dict", "set", "bytearray", "deque", "defaultdict", "Counter", "OrderedDict"];
+        if mutable.iter().any(|mc| name == *mc) {
+            return true;
+        }
+        if let Some(first_char) = name.chars().next() {
+            if first_char.is_uppercase() {
+                let class_name = name.split('.').next_back().unwrap_or(&name);
+                return !frozen_classes.contains(class_name);
+            }
+        }
+        if func.kind() == "attribute" {
+            if let Some(attr) = func.child_by_field_name("attribute") {
+                let attr_name = Self::node_text(attr, source);
+                if let Some(first_char) = attr_name.chars().next() {
+                    if first_char.is_uppercase() {
+                        return !frozen_classes.contains(attr_name.as_str());
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn is_mutable_node(
         node: tree_sitter::Node,
         source: &[u8],
@@ -1384,82 +1467,7 @@ impl PythonParser {
     ) -> bool {
         match node.kind() {
             "list" | "dictionary" | "set" => true,
-            "call" => {
-                let func = node.child_by_field_name("function");
-                if let Some(f) = func {
-                    let name = Self::node_text(f, source);
-                    // Known immutable constructors
-                    let immutable_constructors = [
-                        "int",
-                        "str",
-                        "float",
-                        "bool",
-                        "bytes",
-                        "complex",
-                        "tuple",
-                        "frozenset",
-                        "NoneType",
-                        "Path",
-                        "PurePath",
-                        "PurePosixPath",
-                        "PureWindowsPath",
-                        "Decimal",
-                        "date",
-                        "datetime",
-                        "time",
-                        "timedelta",
-                        "UUID",
-                        "ipaddress",
-                        "IPv4Address",
-                        "IPv6Address",
-                        "re.compile",
-                        "enum",
-                    ];
-                    if immutable_constructors.iter().any(|ic| name == *ic) {
-                        return false;
-                    }
-                    // Known mutable constructors
-                    let mutable_constructors = [
-                        "list",
-                        "dict",
-                        "set",
-                        "bytearray",
-                        "deque",
-                        "defaultdict",
-                        "Counter",
-                        "OrderedDict",
-                    ];
-                    if mutable_constructors.iter().any(|mc| name == *mc) {
-                        return true;
-                    }
-                    // Class instance constructor: uppercase first letter = class convention
-                    if let Some(first_char) = name.chars().next() {
-                        if first_char.is_uppercase() {
-                            // Check if it's a frozen dataclass
-                            let class_name = name.split('.').next_back().unwrap_or(&name);
-                            if frozen_classes.contains(class_name) {
-                                return false;
-                            }
-                            return true;
-                        }
-                    }
-                    // Check for attribute access like module.Class()
-                    if f.kind() == "attribute" {
-                        if let Some(attr) = f.child_by_field_name("attribute") {
-                            let attr_name = Self::node_text(attr, source);
-                            if let Some(first_char) = attr_name.chars().next() {
-                                if first_char.is_uppercase() {
-                                    if frozen_classes.contains(attr_name.as_str()) {
-                                        return false;
-                                    }
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-                false
-            }
+            "call" => Self::is_mutable_call_node(node, source, frozen_classes),
             _ => false,
         }
     }
@@ -1468,35 +1476,32 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_random_call(*b, source))
     }
 
+    fn is_random_call_node(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let text = Self::node_text(func, source);
+        let random_fns = [
+            "random.random", "random.randint", "random.choice", "random.shuffle",
+            "random.uniform", "random.randrange", "random.sample",
+            "random.gauss", "random.normalvariate",
+        ];
+        if random_fns.iter().any(|rf| text == *rf) {
+            return true;
+        }
+        if let Some(o) = func.child_by_field_name("object") {
+            return Self::node_text(o, source) == "random";
+        }
+        false
+    }
+
     fn has_random_call(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                let random_fns = [
-                    "random.random",
-                    "random.randint",
-                    "random.choice",
-                    "random.shuffle",
-                    "random.uniform",
-                    "random.randrange",
-                    "random.sample",
-                    "random.gauss",
-                    "random.normalvariate",
-                ];
-                if random_fns.iter().any(|rf| text == *rf) {
-                    return true;
-                }
-                if f.kind() == "attribute" {
-                    let obj = f.child_by_field_name("object");
-                    if let Some(o) = obj {
-                        let obj_name = Self::node_text(o, source);
-                        if obj_name == "random" {
-                            return true;
-                        }
-                    }
-                }
-            }
+        if Self::is_random_call_node(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1511,26 +1516,29 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_random_seed_call(*b, source))
     }
 
-    fn has_random_seed_call(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                if text == "random.seed" {
-                    return true;
-                }
-                if f.kind() == "attribute" {
-                    let attr = f.child_by_field_name("attribute");
-                    let obj = f.child_by_field_name("object");
-                    if let (Some(a), Some(o)) = (attr, obj) {
-                        let attr_name = Self::node_text(a, source);
-                        let obj_name = Self::node_text(o, source);
-                        if attr_name == "seed" && obj_name == "random" {
-                            return true;
-                        }
-                    }
-                }
+    fn is_random_seed_call_node(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let text = Self::node_text(func, source);
+        if text == "random.seed" {
+            return true;
+        }
+        if func.kind() == "attribute" {
+            if let (Some(a), Some(o)) = (func.child_by_field_name("attribute"), func.child_by_field_name("object")) {
+                return Self::node_text(a, source) == "seed" && Self::node_text(o, source) == "random";
             }
+        }
+        false
+    }
+
+    fn has_random_seed_call(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if Self::is_random_seed_call_node(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1545,31 +1553,31 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_subprocess_call(*b, source))
     }
 
+    fn is_subprocess_call_node(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let text = Self::node_text(func, source);
+        let subprocess_fns = [
+            "subprocess.Popen", "subprocess.run", "subprocess.call",
+            "subprocess.check_output", "subprocess.check_call",
+        ];
+        if subprocess_fns.iter().any(|sf| text == *sf) {
+            return true;
+        }
+        if let Some(o) = func.child_by_field_name("object") {
+            return Self::node_text(o, source) == "subprocess";
+        }
+        false
+    }
+
     fn has_subprocess_call(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                let subprocess_fns = [
-                    "subprocess.Popen",
-                    "subprocess.run",
-                    "subprocess.call",
-                    "subprocess.check_output",
-                    "subprocess.check_call",
-                ];
-                if subprocess_fns.iter().any(|sf| text == *sf) {
-                    return true;
-                }
-                if f.kind() == "attribute" {
-                    let obj = f.child_by_field_name("object");
-                    if let Some(o) = obj {
-                        let obj_name = Self::node_text(o, source);
-                        if obj_name == "subprocess" {
-                            return true;
-                        }
-                    }
-                }
-            }
+        if Self::is_subprocess_call_node(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1584,36 +1592,41 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_timeout_arg(*b, source))
     }
 
-    fn has_timeout_arg(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                let subprocess_fns = [
-                    "subprocess.Popen",
-                    "subprocess.run",
-                    "subprocess.call",
-                    "subprocess.check_output",
-                    "subprocess.check_call",
-                ];
-                if subprocess_fns.iter().any(|sf| text == *sf) {
-                    let args = node.child_by_field_name("arguments");
-                    if let Some(a) = args {
-                        let mut cursor = a.walk();
-                        for child in a.children(&mut cursor) {
-                            if child.kind() == "keyword_argument" {
-                                let name = child.child_by_field_name("name");
-                                if let Some(n) = name {
-                                    if Self::node_text(n, source) == "timeout" {
-                                        return false;
-                                    }
-                                }
-                            }
+    fn call_has_timeout_kwarg(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if let Some(a) = node.child_by_field_name("arguments") {
+            let mut cursor = a.walk();
+            for child in a.children(&mut cursor) {
+                if child.kind() == "keyword_argument" {
+                    if let Some(n) = child.child_by_field_name("name") {
+                        if Self::node_text(n, source) == "timeout" {
+                            return true;
                         }
                     }
-                    return true;
                 }
             }
+        }
+        false
+    }
+
+    fn is_subprocess_call_missing_timeout(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let text = Self::node_text(func, source);
+        let subprocess_fns = [
+            "subprocess.Popen", "subprocess.run", "subprocess.call",
+            "subprocess.check_output", "subprocess.check_call",
+        ];
+        subprocess_fns.iter().any(|sf| text == *sf) && !Self::call_has_timeout_kwarg(node, source)
+    }
+
+    fn has_timeout_arg(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if Self::is_subprocess_call_missing_timeout(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1635,57 +1648,68 @@ impl PythonParser {
         (!details.is_empty(), details)
     }
 
+    fn add_weak_category(details: &mut Vec<String>, category: &str) {
+        if !details.iter().any(|d| d == category) {
+            details.push(category.to_string());
+        }
+    }
+
+    fn check_weak_call(node: tree_sitter::Node, source: &[u8], details: &mut Vec<String>) {
+        if node.kind() != "call" {
+            return;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return,
+        };
+        let text = Self::node_text(func, source);
+        let weak_patterns: &[(&str, &str)] = &[
+            ("assertIsInstance", "type-only assertion"),
+            ("isinstance", "type-only assertion"),
+            ("assertTrue", "existence-only assertion"),
+            ("assertIsNotNone", "existence-only assertion"),
+            ("assertIn", "key-presence-only assertion"),
+        ];
+        for (pattern, category) in weak_patterns {
+            if text.contains(pattern) {
+                Self::add_weak_category(details, category);
+            }
+        }
+    }
+
+    fn check_weak_comparison(node: tree_sitter::Node, source: &[u8], details: &mut Vec<String>) {
+        if node.kind() != "comparison_operator" {
+            return;
+        }
+        let mut cursor = node.walk();
+        let children: Vec<_> = node.children(&mut cursor).collect();
+        let ops: Vec<String> = children
+            .iter()
+            .map(|c| Self::node_text(*c, source).trim().to_string())
+            .collect();
+
+        for op in &ops {
+            if op == "in" {
+                Self::add_weak_category(details, "key-presence-only assertion");
+            }
+            if *op == "is not" && ops.iter().any(|r| *r == "None") {
+                Self::add_weak_category(details, "existence-only assertion");
+            }
+        }
+        for (i, child) in children.iter().enumerate() {
+            let text = Self::node_text(*child, source);
+            if text == "type" && i + 1 < children.len() {
+                let next_text = Self::node_text(children[i + 1], source);
+                if next_text == "==" || next_text == "is" {
+                    Self::add_weak_category(details, "type-only assertion");
+                }
+            }
+        }
+    }
+
     fn collect_weak_assertions(node: tree_sitter::Node, source: &[u8], details: &mut Vec<String>) {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                let weak_patterns: &[(&str, &str)] = &[
-                    ("assertIsInstance", "type-only assertion"),
-                    ("isinstance", "type-only assertion"),
-                    ("assertTrue", "existence-only assertion"),
-                    ("assertIsNotNone", "existence-only assertion"),
-                    ("assertIn", "key-presence-only assertion"),
-                ];
-                for (pattern, category) in weak_patterns {
-                    if text.contains(pattern) {
-                        let already = details.iter().any(|d| d == *category);
-                        if !already {
-                            details.push(category.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        if node.kind() == "comparison_operator" {
-            let mut cursor = node.walk();
-            let children: Vec<_> = node.children(&mut cursor).collect();
-            let ops: Vec<String> = children
-                .iter()
-                .map(|c| Self::node_text(*c, source).trim().to_string())
-                .collect();
-            for op in &ops {
-                if op == "in" {
-                    details.push("key-presence-only assertion".to_string());
-                }
-                if *op == "is not" {
-                    for right_text in &ops {
-                        if *right_text == "None" {
-                            details.push("existence-only assertion".to_string());
-                        }
-                    }
-                }
-            }
-            for (i, child) in children.iter().enumerate() {
-                let text = Self::node_text(*child, source);
-                if text == "type" && i + 1 < children.len() {
-                    let next_text = Self::node_text(children[i + 1], source);
-                    if next_text == "==" || next_text == "is" {
-                        details.push("type-only assertion".to_string());
-                    }
-                }
-            }
-        }
+        Self::check_weak_call(node, source, details);
+        Self::check_weak_comparison(node, source, details);
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             Self::collect_weak_assertions(child, source, details);
