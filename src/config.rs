@@ -151,26 +151,30 @@ impl Config {
         }
     }
 
+    fn merge_rule_configs(rules: HashMap<String, RuleConfig>, cfg: &mut Config) {
+        for (id, override_rc) in rules.into_iter() {
+            cfg.rules
+                .entry(id)
+                .and_modify(|existing| {
+                    if let Some(e) = override_rc.enabled {
+                        existing.enabled = Some(e);
+                    }
+                    if let Some(sev) = override_rc.severity {
+                        existing.severity = Some(sev);
+                    }
+                })
+                .or_insert(RuleConfig {
+                    enabled: override_rc.enabled,
+                    severity: override_rc.severity,
+                });
+        }
+    }
+
     /// Build a Config from a parsed ToolConfig, resolving paths relative to config_dir.
     fn build_from_tool_config(tool_config: ToolConfig, config_dir: &Path) -> Self {
         let mut cfg = Config::default();
         if let Some(rules) = tool_config.rules {
-            for (id, override_rc) in rules.into_iter() {
-                cfg.rules
-                    .entry(id)
-                    .and_modify(|existing| {
-                        if let Some(e) = override_rc.enabled {
-                            existing.enabled = Some(e);
-                        }
-                        if let Some(sev) = override_rc.severity {
-                            existing.severity = Some(sev);
-                        }
-                    })
-                    .or_insert(RuleConfig {
-                        enabled: override_rc.enabled,
-                        severity: override_rc.severity,
-                    });
-            }
+            Self::merge_rule_configs(rules, &mut cfg);
         }
         if tool_config.format.is_some() {
             cfg.format = tool_config.format;
@@ -190,54 +194,48 @@ impl Config {
         cfg
     }
 
+    /// Extract and deserialize the [tool.pytest-linter] section from a pyproject.toml file.
+    /// Returns Ok(None) if the section is missing or empty.
+    fn process_pyproject_toml(path: &Path) -> Result<Option<Config>> {
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("read {}", path.display()))?;
+        let full: toml::Value = toml::from_str(&contents)
+            .with_context(|| format!("parse TOML in {}", path.display()))?;
+
+        let tool_table = full
+            .get("tool")
+            .and_then(|t| t.as_table())
+            .and_then(|t| t.get("pytest-linter"))
+            .cloned()
+            .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()));
+
+        let table = match tool_table.as_table() {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+        if table.is_empty() {
+            return Ok(None);
+        }
+
+        let tool_config: ToolConfig = tool_table.try_into().with_context(|| {
+            format!("deserialize tool.pytest-linter from {}", path.display())
+        })?;
+
+        let config_dir = path.parent().unwrap_or(Path::new("."));
+        let cfg = Self::build_from_tool_config(tool_config, config_dir);
+        Ok(Some(cfg))
+    }
+
     /// Load configuration by walking up from `dir` to find pyproject.toml and the [tool.pytest-linter] section
     pub fn from_pyproject(dir: &Path) -> Result<Option<Self>> {
         let mut current = dir;
         loop {
             let candidate = current.join("pyproject.toml");
             if candidate.exists() {
-                let contents = std::fs::read_to_string(&candidate)
-                    .with_context(|| format!("read {}", candidate.display()))?;
-                let full: toml::Value = toml::from_str(&contents)
-                    .with_context(|| format!("parse TOML in {}", candidate.display()))?;
-
-                let tool_table = full
-                    .get("tool")
-                    .and_then(|t| t.as_table())
-                    .and_then(|t| t.get("pytest-linter"))
-                    .cloned()
-                    .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()));
-
-                let table = match tool_table.as_table() {
-                    Some(t) => t,
-                    None => {
-                        match current.parent() {
-                            Some(parent) => current = parent,
-                            None => break,
-                        }
-                        continue;
-                    }
-                };
-                if table.is_empty() {
-                    match current.parent() {
-                        Some(parent) => current = parent,
-                        None => break,
-                    }
-                    continue;
+                if let Some(cfg) = Self::process_pyproject_toml(&candidate)? {
+                    return Ok(Some(cfg));
                 }
-
-                let tool_config: ToolConfig = tool_table.try_into().with_context(|| {
-                    format!(
-                        "deserialize tool.pytest-linter from {}",
-                        candidate.display()
-                    )
-                })?;
-
-                let config_dir = candidate.parent().unwrap_or(Path::new("."));
-                let cfg = Self::build_from_tool_config(tool_config, config_dir);
-                return Ok(Some(cfg));
             }
-
             match current.parent() {
                 Some(parent) => current = parent,
                 None => break,
@@ -338,6 +336,41 @@ impl Config {
         self
     }
 
+    /// Apply a single override config to the effective rules if the file path matches.
+    fn apply_override(
+        effective: &mut HashMap<String, RuleConfig>,
+        override_cfg: &OverrideConfig,
+        file_path: &Path,
+        config_dir: Option<&PathBuf>,
+    ) -> Result<()> {
+        let override_base = override_cfg.base_dir.as_ref().or(config_dir);
+        let effective_path = override_base
+            .and_then(|dir| file_path.strip_prefix(dir).ok())
+            .unwrap_or(file_path);
+        let pattern = glob::Pattern::new(&override_cfg.path).with_context(|| {
+            format!(
+                "invalid glob pattern '{}' in override configuration",
+                override_cfg.path
+            )
+        })?;
+        if pattern.matches_path(effective_path) {
+            for (rule_id, rule_config) in &override_cfg.rules {
+                effective
+                    .entry(rule_id.clone())
+                    .and_modify(|existing| {
+                        if rule_config.enabled.is_some() {
+                            existing.enabled = rule_config.enabled;
+                        }
+                        if rule_config.severity.is_some() {
+                            existing.severity = rule_config.severity;
+                        }
+                    })
+                    .or_insert((*rule_config).clone());
+            }
+        }
+        Ok(())
+    }
+
     /// Compute the effective rule configuration for a specific file path,
     /// applying any matching override entries on top of the global config.
     pub fn effective_rules_for_file(
@@ -346,38 +379,13 @@ impl Config {
     ) -> Result<HashMap<String, RuleConfig>> {
         let mut effective = self.rules.clone();
 
-        let relative_path = self
-            .config_dir
-            .as_ref()
-            .and_then(|dir| file_path.strip_prefix(dir).ok())
-            .unwrap_or(file_path);
-
         for override_cfg in &self.overrides {
-            let override_base = override_cfg.base_dir.as_ref().or(self.config_dir.as_ref());
-            let relative_path = override_base
-                .and_then(|dir| file_path.strip_prefix(dir).ok())
-                .unwrap_or(relative_path);
-            let pattern = glob::Pattern::new(&override_cfg.path).with_context(|| {
-                format!(
-                    "invalid glob pattern '{}' in override configuration",
-                    override_cfg.path
-                )
-            })?;
-            if pattern.matches_path(relative_path) {
-                for (rule_id, rule_config) in &override_cfg.rules {
-                    effective
-                        .entry(rule_id.clone())
-                        .and_modify(|existing| {
-                            if rule_config.enabled.is_some() {
-                                existing.enabled = rule_config.enabled;
-                            }
-                            if rule_config.severity.is_some() {
-                                existing.severity = rule_config.severity;
-                            }
-                        })
-                        .or_insert((*rule_config).clone());
-                }
-            }
+            Self::apply_override(
+                &mut effective,
+                override_cfg,
+                file_path,
+                self.config_dir.as_ref(),
+            )?;
         }
 
         Ok(effective)

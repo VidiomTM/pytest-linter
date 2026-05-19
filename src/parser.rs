@@ -10,6 +10,78 @@ struct DecoratorInfo<'a> {
     node: Option<tree_sitter::Node<'a>>,
 }
 
+struct ParseState {
+    count: usize,
+    depth: usize,
+    quote_char: Option<char>,
+    escape: bool,
+    has_content_since_last_comma: bool,
+}
+
+impl ParseState {
+    fn new() -> Self {
+        Self {
+            count: 0,
+            depth: 0,
+            quote_char: None,
+            escape: false,
+            has_content_since_last_comma: false,
+        }
+    }
+
+    fn process_char(&mut self, c: char) {
+        if self.escape {
+            self.escape = false;
+            self.has_content_since_last_comma = true;
+            return;
+        }
+        if c == '\\' {
+            self.escape = true;
+            self.has_content_since_last_comma = true;
+            return;
+        }
+        if let Some(qc) = self.quote_char {
+            if c == qc {
+                self.quote_char = None;
+            }
+            self.has_content_since_last_comma = true;
+            return;
+        }
+        match c {
+            '"' | '\'' => {
+                self.quote_char = Some(c);
+                self.has_content_since_last_comma = true;
+            }
+            '(' | '[' | '{' => {
+                self.depth += 1;
+                self.has_content_since_last_comma = true;
+            }
+            ')' | ']' | '}' if self.depth > 0 => {
+                self.depth -= 1;
+                self.has_content_since_last_comma = true;
+            }
+            ',' if self.depth == 0 => {
+                if self.has_content_since_last_comma {
+                    self.count += 1;
+                }
+                self.has_content_since_last_comma = false;
+            }
+            _ => {
+                if !c.is_whitespace() {
+                    self.has_content_since_last_comma = true;
+                }
+            }
+        }
+    }
+
+    fn finish(mut self) -> usize {
+        if self.has_content_since_last_comma {
+            self.count += 1;
+        }
+        self.count
+    }
+}
+
 /// Tree-sitter based Python test file parser that extracts test functions and fixtures.
 pub struct PythonParser {
     parser: Parser,
@@ -357,60 +429,11 @@ impl PythonParser {
     }
 
     fn count_top_level_entries(inner: &str) -> usize {
-        let mut count = 0;
-        let mut depth = 0;
-        let mut quote_char: Option<char> = None;
-        let mut escape = false;
-        let mut has_content_since_last_comma = false;
-
+        let mut state = ParseState::new();
         for c in inner.chars() {
-            if escape {
-                escape = false;
-                has_content_since_last_comma = true;
-                continue;
-            }
-            if c == '\\' {
-                escape = true;
-                has_content_since_last_comma = true;
-                continue;
-            }
-            if let Some(qc) = quote_char {
-                if c == qc {
-                    quote_char = None;
-                }
-                has_content_since_last_comma = true;
-                continue;
-            }
-            match c {
-                '"' | '\'' => {
-                    quote_char = Some(c);
-                    has_content_since_last_comma = true;
-                }
-                '(' | '[' | '{' => {
-                    depth += 1;
-                    has_content_since_last_comma = true;
-                }
-                ')' | ']' | '}' if depth > 0 => {
-                    depth -= 1;
-                    has_content_since_last_comma = true;
-                }
-                ',' if depth == 0 => {
-                    if has_content_since_last_comma {
-                        count += 1;
-                    }
-                    has_content_since_last_comma = false;
-                }
-                _ => {
-                    if !c.is_whitespace() {
-                        has_content_since_last_comma = true;
-                    }
-                }
-            }
+            state.process_char(c);
         }
-        if has_content_since_last_comma {
-            count += 1;
-        }
-        count
+        state.finish()
     }
 
     fn count_assertions(body: Option<&tree_sitter::Node>) -> usize {
@@ -717,26 +740,36 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_pytest_raises(*b, source))
     }
 
-    fn has_pytest_raises(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                if f.kind() == "attribute" {
-                    let text = Self::node_text(f, source);
-                    if text == "pytest.raises" {
-                        return true;
-                    }
-                    let attr = f.child_by_field_name("attribute");
-                    let obj = f.child_by_field_name("object");
-                    if let (Some(a), Some(o)) = (attr, obj) {
-                        let name = Self::node_text(a, source);
-                        let obj_name = Self::node_text(o, source);
-                        if name == "raises" && obj_name == "pytest" {
-                            return true;
-                        }
-                    }
-                }
+    fn is_pytest_raises_call(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        if func.kind() != "attribute" {
+            return false;
+        }
+        let text = Self::node_text(func, source);
+        if text == "pytest.raises" {
+            return true;
+        }
+        let attr = func.child_by_field_name("attribute");
+        let obj = func.child_by_field_name("object");
+        if let (Some(a), Some(o)) = (attr, obj) {
+            let name = Self::node_text(a, source);
+            let obj_name = Self::node_text(o, source);
+            if name == "raises" && obj_name == "pytest" {
+                return true;
             }
+        }
+        false
+    }
+
+    fn has_pytest_raises(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if Self::is_pytest_raises_call(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -908,6 +941,14 @@ impl PythonParser {
         }
     }
 
+    fn follow_chain_node<'a>(current: &tree_sitter::Node<'a>) -> Option<tree_sitter::Node<'a>> {
+        match current.kind() {
+            "attribute" => current.child_by_field_name("object"),
+            "subscript" => current.child_by_field_name("value"),
+            _ => None,
+        }
+    }
+
     /// Get the root fixture name from an attribute chain.
     fn get_fixture_root(
         node: &tree_sitter::Node,
@@ -922,18 +963,8 @@ impl PythonParser {
                     return name;
                 }
             }
-            if current.kind() == "attribute" {
-                if let Some(obj) = current.child_by_field_name("object") {
-                    current = obj;
-                } else {
-                    break;
-                }
-            } else if current.kind() == "subscript" {
-                if let Some(val) = current.child_by_field_name("value") {
-                    current = val;
-                } else {
-                    break;
-                }
+            if let Some(next) = Self::follow_chain_node(&current) {
+                current = next;
             } else {
                 break;
             }
@@ -1057,21 +1088,35 @@ impl PythonParser {
         }
     }
 
+    fn is_session_scope(dec: &str) -> bool {
+        dec.contains("scope") && (dec.contains("\"session\"") || dec.contains("'session'"))
+    }
+
+    fn is_package_scope(dec: &str) -> bool {
+        dec.contains("scope") && (dec.contains("\"package\"") || dec.contains("'package'"))
+    }
+
+    fn is_module_scope(dec: &str) -> bool {
+        dec.contains("scope") && (dec.contains("\"module\"") || dec.contains("'module'"))
+    }
+
+    fn is_class_scope(dec: &str) -> bool {
+        dec.contains("scope") && (dec.contains("\"class\"") || dec.contains("'class'"))
+    }
+
     fn extract_fixture_scope(decorators: &[String]) -> FixtureScope {
         for dec in decorators {
-            if dec.contains("scope") {
-                if dec.contains("\"session\"") || dec.contains("'session'") {
-                    return FixtureScope::Session;
-                }
-                if dec.contains("\"package\"") || dec.contains("'package'") {
-                    return FixtureScope::Package;
-                }
-                if dec.contains("\"module\"") || dec.contains("'module'") {
-                    return FixtureScope::Module;
-                }
-                if dec.contains("\"class\"") || dec.contains("'class'") {
-                    return FixtureScope::Class;
-                }
+            if Self::is_session_scope(dec) {
+                return FixtureScope::Session;
+            }
+            if Self::is_package_scope(dec) {
+                return FixtureScope::Package;
+            }
+            if Self::is_module_scope(dec) {
+                return FixtureScope::Module;
+            }
+            if Self::is_class_scope(dec) {
+                return FixtureScope::Class;
             }
         }
         FixtureScope::Function
@@ -1081,24 +1126,30 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_file_io_call(*b, source))
     }
 
-    fn has_file_io_call(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let name = Self::node_text(f, source);
-                if ["open", "read", "write"].contains(&name.as_str()) {
-                    return true;
-                }
-                if f.kind() == "attribute" {
-                    let attr = f.child_by_field_name("attribute");
-                    if let Some(a) = attr {
-                        let attr_name = Self::node_text(a, source);
-                        if ["read", "write", "open"].contains(&attr_name.as_str()) {
-                            return true;
-                        }
-                    }
-                }
+    fn is_file_io_call_node(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let name = Self::node_text(func, source);
+        if ["open", "read", "write"].contains(&name.as_str()) {
+            return true;
+        }
+        if func.kind() == "attribute" {
+            if let Some(attr) = func.child_by_field_name("attribute") {
+                let attr_name = Self::node_text(attr, source);
+                return ["read", "write", "open"].contains(&attr_name.as_str());
             }
+        }
+        false
+    }
+
+    fn has_file_io_call(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if Self::is_file_io_call_node(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1113,24 +1164,30 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_time_sleep_call(*b, source))
     }
 
-    fn has_time_sleep_call(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                if text == "time.sleep" || text == "sleep" {
-                    return true;
-                }
-                if f.kind() == "attribute" {
-                    let attr = f.child_by_field_name("attribute");
-                    if let Some(a) = attr {
-                        let name = Self::node_text(a, source);
-                        if name == "sleep" {
-                            return true;
-                        }
-                    }
-                }
+    fn is_time_sleep_call_node(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let text = Self::node_text(func, source);
+        if text == "time.sleep" || text == "sleep" {
+            return true;
+        }
+        if func.kind() == "attribute" {
+            if let Some(attr) = func.child_by_field_name("attribute") {
+                let name = Self::node_text(attr, source);
+                return name == "sleep";
             }
+        }
+        false
+    }
+
+    fn has_time_sleep_call(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if Self::is_time_sleep_call_node(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1145,26 +1202,29 @@ impl PythonParser {
         body.and_then(|b| Self::find_sleep_value(*b, source))
     }
 
+    fn try_extract_unary_neg(node: tree_sitter::Node, source: &[u8]) -> Option<f64> {
+        let op = node
+            .child_by_field_name("operator")
+            .map(|op| Self::node_text(op, source));
+        if op.as_deref() != Some("-") {
+            return None;
+        }
+        let operand = node.child_by_field_name("argument")?;
+        let val_str = Self::node_text(operand, source);
+        val_str.parse::<f64>().ok().map(|v| -v)
+    }
+
     fn extract_sleep_arg(node: tree_sitter::Node, source: &[u8]) -> Option<f64> {
-        if let Some(arg) = node.child_by_field_name("arguments") {
-            for child in arg.children(&mut arg.walk()) {
-                if child.kind() == "integer" || child.kind() == "float" {
-                    let val_str = Self::node_text(child, source);
-                    if let Ok(val) = val_str.parse::<f64>() {
-                        return Some(val);
-                    }
-                } else if child.kind() == "unary_operator" {
-                    let op = child
-                        .child_by_field_name("operator")
-                        .map(|op| Self::node_text(op, source));
-                    if op.as_deref() == Some("-") {
-                        if let Some(operand) = child.child_by_field_name("argument") {
-                            let val_str = Self::node_text(operand, source);
-                            if let Ok(val) = val_str.parse::<f64>() {
-                                return Some(-val);
-                            }
-                        }
-                    }
+        let arg = node.child_by_field_name("arguments")?;
+        for child in arg.children(&mut arg.walk()) {
+            if matches!(child.kind(), "integer" | "float") {
+                let val_str = Self::node_text(child, source);
+                if let Ok(val) = val_str.parse::<f64>() {
+                    return Some(val);
+                }
+            } else if child.kind() == "unary_operator" {
+                if let Some(val) = Self::try_extract_unary_neg(child, source) {
+                    return Some(val);
                 }
             }
         }
@@ -1187,15 +1247,21 @@ impl PythonParser {
         false
     }
 
+    fn update_max(current: Option<f64>, candidate: f64) -> Option<f64> {
+        match current {
+            None => Some(candidate),
+            Some(c) if candidate > c => Some(candidate),
+            _ => current,
+        }
+    }
+
     fn find_sleep_value(node: tree_sitter::Node, source: &[u8]) -> Option<f64> {
         let mut max_val: Option<f64> = None;
 
         if node.kind() == "call" {
             if let Some(func) = node.child_by_field_name("function") {
                 if Self::is_sleep_call(func, source) {
-                    if let Some(val) = Self::extract_sleep_arg(node, source) {
-                        max_val = Some(val);
-                    }
+                    max_val = Self::extract_sleep_arg(node, source);
                 }
             }
         }
@@ -1203,11 +1269,7 @@ impl PythonParser {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if let Some(val) = Self::find_sleep_value(child, source) {
-                match max_val {
-                    None => max_val = Some(val),
-                    Some(current) if val > current => max_val = Some(val),
-                    _ => {}
-                }
+                max_val = Self::update_max(max_val, val);
             }
         }
 
@@ -1358,34 +1420,44 @@ impl PythonParser {
         false
     }
 
+    fn process_decorated_definition(
+        node: &tree_sitter::Node,
+        source: &[u8],
+        frozen: &mut HashSet<String>,
+    ) {
+        let mut inner = node.walk();
+        let mut class_node = None;
+        let mut decorators_text = Vec::new();
+        for c in node.children(&mut inner) {
+            match c.kind() {
+                "class_definition" => class_node = Some(c),
+                "decorator" => {
+                    decorators_text.push(Self::node_text(c, source));
+                }
+                _ => {}
+            }
+        }
+        let cls = match class_node {
+            Some(cls) => cls,
+            None => return,
+        };
+        let is_frozen = decorators_text.iter().any(|d| {
+            (d.contains("dataclass") && d.contains("frozen") && d.contains("True"))
+                || d.contains("@frozen")
+        });
+        if is_frozen {
+            if let Some(name_node) = cls.child_by_field_name("name") {
+                frozen.insert(Self::node_text(name_node, source));
+            }
+        }
+    }
+
     fn detect_frozen_dataclass_names(root: &tree_sitter::Node, source: &[u8]) -> HashSet<String> {
         let mut frozen = HashSet::new();
         let mut cursor = root.walk();
         for child in root.children(&mut cursor) {
             if child.kind() == "decorated_definition" {
-                let mut inner = child.walk();
-                let mut class_node = None;
-                let mut decorators_text = Vec::new();
-                for c in child.children(&mut inner) {
-                    match c.kind() {
-                        "class_definition" => class_node = Some(c),
-                        "decorator" => {
-                            decorators_text.push(Self::node_text(c, source));
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(cls) = class_node {
-                    let is_frozen = decorators_text.iter().any(|d| {
-                        (d.contains("dataclass") && d.contains("frozen") && d.contains("True"))
-                            || d.contains("@frozen")
-                    });
-                    if is_frozen {
-                        if let Some(name_node) = cls.child_by_field_name("name") {
-                            frozen.insert(Self::node_text(name_node, source));
-                        }
-                    }
-                }
+                Self::process_decorated_definition(&child, source, &mut frozen);
             }
         }
         frozen
@@ -1421,6 +1493,31 @@ impl PythonParser {
         false
     }
 
+    fn is_uppercase_class_not_frozen(
+        name: &str,
+        frozen_classes: &HashSet<String>,
+    ) -> Option<bool> {
+        let first_char = name.chars().next()?;
+        if !first_char.is_uppercase() {
+            return None;
+        }
+        let class_name = name.split('.').next_back().unwrap_or(name);
+        Some(!frozen_classes.contains(class_name))
+    }
+
+    fn check_attr_uppercase(
+        func: tree_sitter::Node,
+        source: &[u8],
+        frozen_classes: &HashSet<String>,
+    ) -> Option<bool> {
+        if func.kind() != "attribute" {
+            return None;
+        }
+        let attr = func.child_by_field_name("attribute")?;
+        let attr_name = Self::node_text(attr, source);
+        Self::is_uppercase_class_not_frozen(&attr_name, frozen_classes)
+    }
+
     fn is_mutable_call_node(node: tree_sitter::Node, source: &[u8], frozen_classes: &HashSet<String>) -> bool {
         if node.kind() != "call" {
             return false;
@@ -1441,23 +1538,10 @@ impl PythonParser {
         if mutable.iter().any(|mc| name == *mc) {
             return true;
         }
-        if let Some(first_char) = name.chars().next() {
-            if first_char.is_uppercase() {
-                let class_name = name.split('.').next_back().unwrap_or(&name);
-                return !frozen_classes.contains(class_name);
-            }
+        if let Some(result) = Self::is_uppercase_class_not_frozen(&name, frozen_classes) {
+            return result;
         }
-        if func.kind() == "attribute" {
-            if let Some(attr) = func.child_by_field_name("attribute") {
-                let attr_name = Self::node_text(attr, source);
-                if let Some(first_char) = attr_name.chars().next() {
-                    if first_char.is_uppercase() {
-                        return !frozen_classes.contains(attr_name.as_str());
-                    }
-                }
-            }
-        }
-        false
+        Self::check_attr_uppercase(func, source, frozen_classes).unwrap_or(false)
     }
 
     fn is_mutable_node(
@@ -1716,76 +1800,46 @@ impl PythonParser {
         }
     }
 
-    fn detect_stdlib_mock_targets(
+    const STDLIB_MODULES: &[&str] = &[
+        "subprocess",
+        "os",
+        "os.path",
+        "sys",
+        "socket",
+        "http.client",
+        "http.server",
+        "builtins",
+        "io",
+        "pathlib",
+        "json",
+        "csv",
+        "re",
+        "time",
+        "datetime",
+        "shutil",
+        "tempfile",
+        "glob",
+        "logging",
+        "warnings",
+        "threading",
+        "multiprocessing",
+        "asyncio",
+    ];
+
+    fn collect_patch_targets(
+        decorators: &[DecoratorInfo],
         body: Option<&tree_sitter::Node>,
         source: &[u8],
-        decorators: &[DecoratorInfo],
+        filter_stdlib: bool,
     ) -> Vec<String> {
-        const STDLIB_MODULES: &[&str] = &[
-            "subprocess",
-            "os",
-            "os.path",
-            "sys",
-            "socket",
-            "http.client",
-            "http.server",
-            "builtins",
-            "io",
-            "pathlib",
-            "json",
-            "csv",
-            "re",
-            "time",
-            "datetime",
-            "shutil",
-            "tempfile",
-            "glob",
-            "logging",
-            "warnings",
-            "threading",
-            "multiprocessing",
-            "asyncio",
-        ];
-
         let mut targets = Vec::new();
-
-        // Check @patch decorators
         for dec in decorators {
             if let Some(target) = extract_patch_target(&dec.text) {
-                if STDLIB_MODULES.iter().any(|m| target.starts_with(m))
-                    && !targets.contains(&target)
+                if filter_stdlib
+                    && !Self::STDLIB_MODULES.iter().any(|m| target.starts_with(m))
                 {
-                    targets.push(target);
+                    continue;
                 }
-            }
-        }
-
-        // Check patch() calls in body
-        if let Some(body_node) = body {
-            let body_text = Self::node_text(*body_node, source);
-            for cap in body_text.match_indices("patch(") {
-                let after = &body_text[cap.0..];
-                if let Some(target) = extract_patch_target(after) {
-                    if STDLIB_MODULES.iter().any(|m| target.starts_with(m))
-                        && !targets.contains(&target)
-                    {
-                        targets.push(target);
-                    }
-                }
-            }
-        }
-
-        targets
-    }
-
-    fn detect_all_patch_targets(
-        body: Option<&tree_sitter::Node>,
-        source: &[u8],
-        decorators: &[DecoratorInfo],
-    ) -> Vec<String> {
-        let mut targets = Vec::new();
-        for dec in decorators {
-            if let Some(target) = extract_patch_target(&dec.text) {
                 if !targets.contains(&target) {
                     targets.push(target);
                 }
@@ -1793,9 +1847,14 @@ impl PythonParser {
         }
         if let Some(body_node) = body {
             let body_text = Self::node_text(*body_node, source);
-            for cap in body_text.match_indices("patch(") {
-                let after = &body_text[cap.0..];
+            for (pos, _) in body_text.match_indices("patch(") {
+                let after = &body_text[pos..];
                 if let Some(target) = extract_patch_target(after) {
+                    if filter_stdlib
+                        && !Self::STDLIB_MODULES.iter().any(|m| target.starts_with(m))
+                    {
+                        continue;
+                    }
                     if !targets.contains(&target) {
                         targets.push(target);
                     }
@@ -1803,6 +1862,22 @@ impl PythonParser {
             }
         }
         targets
+    }
+
+    fn detect_stdlib_mock_targets(
+        body: Option<&tree_sitter::Node>,
+        source: &[u8],
+        decorators: &[DecoratorInfo],
+    ) -> Vec<String> {
+        Self::collect_patch_targets(decorators, body, source, true)
+    }
+
+    fn detect_all_patch_targets(
+        body: Option<&tree_sitter::Node>,
+        source: &[u8],
+        decorators: &[DecoratorInfo],
+    ) -> Vec<String> {
+        Self::collect_patch_targets(decorators, body, source, false)
     }
 
     fn detect_mock_usage(body: Option<&tree_sitter::Node>, source: &[u8]) -> (bool, usize) {

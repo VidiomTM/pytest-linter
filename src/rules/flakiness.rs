@@ -607,8 +607,8 @@ fn collect_random_call_lines(test: &crate::models::TestFunction) -> Vec<usize> {
     }
 }
 
-/// Recursively collect line numbers of random function calls.
-fn collect_random_calls(node: Node, source: &[u8], lines: &mut Vec<usize>) {
+/// Check if a node is a call to a random function.
+fn is_random_call(node: Node, source: &[u8]) -> bool {
     if node.kind() == "call" {
         if let Some(f) = node.child_by_field_name("function") {
             let text = f.utf8_text(source).unwrap_or_default();
@@ -623,14 +623,19 @@ fn collect_random_calls(node: Node, source: &[u8], lines: &mut Vec<usize>) {
                 "random.gauss",
                 "random.normalvariate",
             ];
-            let is_random = random_fns.contains(&text)
+            return random_fns.contains(&text)
                 || (f.kind() == "attribute"
                     && f.child_by_field_name("object")
                         .is_some_and(|o| o.utf8_text(source).unwrap_or_default() == "random"));
-            if is_random {
-                lines.push(node.start_position().row + 1);
-            }
         }
+    }
+    false
+}
+
+/// Recursively collect line numbers of random function calls.
+fn collect_random_calls(node: Node, source: &[u8], lines: &mut Vec<usize>) {
+    if is_random_call(node, source) {
+        lines.push(node.start_position().row + 1);
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -676,8 +681,8 @@ fn collect_unguarded_subprocess_calls(test: &crate::models::TestFunction) -> Vec
     }
 }
 
-/// Recursively collect line numbers of subprocess calls missing a timeout keyword arg.
-fn collect_subprocess_calls_without_timeout(node: Node, source: &[u8], lines: &mut Vec<usize>) {
+/// Check if a node is a call to a subprocess function.
+fn is_subprocess_call(node: Node, source: &[u8]) -> bool {
     if node.kind() == "call" {
         if let Some(f) = node.child_by_field_name("function") {
             let text = f.utf8_text(source).unwrap_or_default();
@@ -688,14 +693,19 @@ fn collect_subprocess_calls_without_timeout(node: Node, source: &[u8], lines: &m
                 "subprocess.check_output",
                 "subprocess.check_call",
             ];
-            let is_subprocess = subprocess_fns.contains(&text)
+            return subprocess_fns.contains(&text)
                 || (f.kind() == "attribute"
                     && f.child_by_field_name("object")
                         .is_some_and(|o| o.utf8_text(source).unwrap_or_default() == "subprocess"));
-            if is_subprocess && !call_has_timeout(node, source) {
-                lines.push(node.start_position().row + 1);
-            }
         }
+    }
+    false
+}
+
+/// Recursively collect line numbers of subprocess calls missing a timeout keyword arg.
+fn collect_subprocess_calls_without_timeout(node: Node, source: &[u8], lines: &mut Vec<usize>) {
+    if is_subprocess_call(node, source) && !call_has_timeout(node, source) {
+        lines.push(node.start_position().row + 1);
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -720,6 +730,20 @@ fn call_has_timeout(call_node: Node, source: &[u8]) -> bool {
     false
 }
 
+/// Search inside a decorated_definition node for a function_definition at the target line.
+#[allow(clippy::manual_find)]
+fn find_in_decorated_definition(node: Node, target_line: usize) -> Option<Node> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "function_definition"
+            && child.start_position().row + 1 == target_line
+        {
+            return Some(child);
+        }
+    }
+    None
+}
+
 /// Find the function_definition node at the given 1-indexed line number.
 fn find_function_node<'tree>(root: &'tree Node<'tree>, target_line: usize) -> Option<Node<'tree>> {
     let mut cursor = root.walk();
@@ -729,13 +753,8 @@ fn find_function_node<'tree>(root: &'tree Node<'tree>, target_line: usize) -> Op
                 return Some(child);
             }
             "decorated_definition" => {
-                let mut inner = child.walk();
-                for c in child.children(&mut inner) {
-                    if c.kind() == "function_definition"
-                        && c.start_position().row + 1 == target_line
-                    {
-                        return Some(c);
-                    }
+                if let Some(found) = find_in_decorated_definition(child, target_line) {
+                    return Some(found);
                 }
             }
             _ => {}

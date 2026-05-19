@@ -231,38 +231,39 @@ pub const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
     "__pycache__",
 ];
 
+/// Returns `true` if the directory entry's name is in the exclusion set.
+fn should_exclude_dir(entry: &walkdir::DirEntry, exclude_set: &HashSet<&str>) -> bool {
+    if !entry.file_type().is_dir() {
+        return false;
+    }
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(|name| exclude_set.contains(name))
+}
+
+/// Walk a directory, applying exclusion filters, and collect matching test files.
+fn walk_dir_for_files(dir: &Path, exclude_set: &HashSet<&str>) -> Vec<PathBuf> {
+    WalkDir::new(dir)
+        .into_iter()
+        .filter_entry(|e| !should_exclude_dir(e, exclude_set))
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| entry.path().is_file() && is_py_test_file(entry.path()))
+        .map(|entry| entry.path().to_path_buf())
+        .collect()
+}
+
 /// Discover test files from the given paths (files or directories),
 /// skipping any directory whose name is in `exclude_dirs`.
 fn discover_files(paths: &[PathBuf], exclude_dirs: &[String]) -> Vec<PathBuf> {
-    let exclude_set: std::collections::HashSet<&str> =
-        exclude_dirs.iter().map(|s| s.as_str()).collect();
-
+    let exclude_set: HashSet<&str> = exclude_dirs.iter().map(|s| s.as_str()).collect();
     let mut files = Vec::new();
 
     for path in paths {
         if path.is_file() && is_py_test_file(path) {
             files.push(path.clone());
         } else if path.is_dir() {
-            for entry in WalkDir::new(path)
-                .into_iter()
-                .filter_entry(|e| {
-                    // Prune directories that match any exclusion pattern
-                    if e.file_type().is_dir() {
-                        if let Some(name) = e.file_name().to_str() {
-                            if exclude_set.contains(name) {
-                                return false;
-                            }
-                        }
-                    }
-                    true
-                })
-                .filter_map(std::result::Result::ok)
-            {
-                let p = entry.path();
-                if p.is_file() && is_py_test_file(p) {
-                    files.push(p.to_path_buf());
-                }
-            }
+            files.extend(walk_dir_for_files(path, &exclude_set));
         }
     }
 

@@ -2,6 +2,20 @@ use crate::engine::make_violation;
 use crate::models::{Category, ParsedModule, Severity, Violation};
 use crate::rules::{Rule, RuleContext};
 
+fn find_patch_target_def_module(target: &str) -> Option<String> {
+    let parts: Vec<&str> = target.split('.').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let class_idx = parts
+        .iter()
+        .position(|p| p.chars().next().is_some_and(|c| c.is_uppercase()))?;
+    if class_idx == 0 {
+        return None;
+    }
+    Some(parts[..class_idx].join("."))
+}
+
 pub struct PatchTargetingDefinitionModuleRule;
 
 impl Rule for PatchTargetingDefinitionModuleRule {
@@ -26,33 +40,22 @@ impl Rule for PatchTargetingDefinitionModuleRule {
         let mut violations = Vec::new();
         for test in &module.test_functions {
             for target in &test.patch_targets {
-                let parts: Vec<&str> = target.split('.').collect();
-                if parts.len() >= 3 {
-                    let class_idx = parts
-                        .iter()
-                        .position(|p| p.chars().next().is_some_and(|c| c.is_uppercase()));
-                    if let Some(ci) = class_idx {
-                        if ci > 0 {
-                            let def_module = parts[..ci].join(".");
-                            let imports_from_definition =
-                                module.imports.iter().any(|imp| imp.contains(&def_module));
-                            if imports_from_definition {
-                                violations.push(make_violation(
-                                    self.id(),
-                                    self.name(),
-                                    self.severity(),
-                                    self.category(),
-                                    format!(
-                                        "Test '{}' patches definition module '{}' — patch the consumer instead",
-                                        test.name, target
-                                    ),
-                                    module.file_path.clone(),
-                                    test.line,
-                                    Some("Patch where the target is used, not where it is defined".to_string()),
-                                    Some(test.name.clone()),
-                                ));
-                            }
-                        }
+                if let Some(def_module) = find_patch_target_def_module(target) {
+                    if module.imports.iter().any(|imp| imp.contains(&def_module)) {
+                        violations.push(make_violation(
+                            self.id(),
+                            self.name(),
+                            self.severity(),
+                            self.category(),
+                            format!(
+                                "Test '{}' patches definition module '{}' — patch the consumer instead",
+                                test.name, target
+                            ),
+                            module.file_path.clone(),
+                            test.line,
+                            Some("Patch where the target is used, not where it is defined".to_string()),
+                            Some(test.name.clone()),
+                        ));
                     }
                 }
             }
