@@ -1,10 +1,10 @@
 //! Rules that detect test maintenance issues: magic asserts, missing assertions, conditional logic.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use crate::engine::make_violation;
-use crate::models::{Category, ParsedModule, Severity, Violation};
+use crate::models::{Category, ParsedModule, Severity, TestFunction, Violation};
 use crate::rules::{Rule, RuleContext};
 
 fn stable_hash(content: &str) -> u64 {
@@ -827,6 +827,79 @@ impl Rule for TestNameLengthRule {
 
 pub struct InlineSchemaRedeclaredRule;
 
+fn extract_dict_content(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if let Some(eq_pos) = trimmed.find("= {") {
+        let rest = &trimmed[eq_pos + 2..].trim();
+        if rest.starts_with('{') && rest.ends_with('}') && rest.len() > 20 && rest.contains(':') {
+            Some(rest.to_string())
+        } else {
+            None
+        }
+    } else if trimmed.starts_with('{')
+        && trimmed.ends_with('}')
+        && trimmed.len() > 20
+        && trimmed.contains(':')
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+fn collect_schema_hashes(tests: &[TestFunction], source: &str) -> HashMap<u64, Vec<String>> {
+    let mut schema_hashes: HashMap<u64, Vec<String>> = HashMap::new();
+    let source_lines: Vec<&str> = source.lines().collect();
+    for test in tests {
+        let start = test.line.saturating_sub(1);
+        let len = test.end_line.saturating_sub(test.line).max(1);
+        for line in source_lines.iter().skip(start).take(len) {
+            if let Some(content) = extract_dict_content(line) {
+                let hash = stable_hash(&content);
+                schema_hashes
+                    .entry(hash)
+                    .or_default()
+                    .push(test.name.clone());
+            }
+        }
+    }
+    schema_hashes
+}
+
+fn build_schema_violations(
+    schema_hashes: &HashMap<u64, Vec<String>>,
+    rule: &InlineSchemaRedeclaredRule,
+    module: &ParsedModule,
+) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    let mut reported = HashSet::new();
+    for (hash, names) in schema_hashes {
+        if names.len() >= 2 && !reported.contains(hash) {
+            reported.insert(*hash);
+            let unique_names: HashSet<&str> = names.iter().map(|n| n.as_str()).collect();
+            if unique_names.len() >= 2 {
+                let test_names: Vec<&str> = unique_names.into_iter().collect();
+                violations.push(make_violation(
+                    rule.id(),
+                    rule.name(),
+                    rule.severity(),
+                    rule.category(),
+                    format!(
+                        "Inline schema redeclared across {} tests: {} — extract to a fixture",
+                        test_names.len(),
+                        test_names.join(", ")
+                    ),
+                    module.file_path.clone(),
+                    1,
+                    Some("Extract shared test data into a fixture or conftest".to_string()),
+                    None,
+                ));
+            }
+        }
+    }
+    violations
+}
+
 impl Rule for InlineSchemaRedeclaredRule {
     fn id(&self) -> &'static str {
         "PYTEST-VAL-001"
@@ -846,74 +919,10 @@ impl Rule for InlineSchemaRedeclaredRule {
         _all_modules: &[ParsedModule],
         _ctx: &RuleContext,
     ) -> Vec<Violation> {
-        let mut violations = Vec::new();
-        let source = &module.source;
-        let tests = &module.test_functions;
-        if tests.len() < 2 {
-            return violations;
+        if module.test_functions.len() < 2 {
+            return Vec::new();
         }
-        let mut schema_hashes: HashMap<u64, Vec<String>> = HashMap::new();
-        let source_lines: Vec<&str> = source.lines().collect();
-        for test in tests {
-            let start = test.line.saturating_sub(1);
-            let len = test.end_line.saturating_sub(test.line).max(1);
-            for line in source_lines.iter().skip(start).take(len) {
-                let trimmed = line.trim();
-                let dict_content = if let Some(eq_pos) = trimmed.find("= {") {
-                    let rest = &trimmed[eq_pos + 2..].trim();
-                    if rest.starts_with('{')
-                        && rest.ends_with('}')
-                        && rest.len() > 20
-                        && rest.contains(':')
-                    {
-                        Some(rest.to_string())
-                    } else {
-                        None
-                    }
-                } else if trimmed.starts_with('{')
-                    && trimmed.ends_with('}')
-                    && trimmed.len() > 20
-                    && trimmed.contains(':')
-                {
-                    Some(trimmed.to_string())
-                } else {
-                    None
-                };
-                if let Some(content) = dict_content {
-                    let hash = stable_hash(&content);
-                    schema_hashes
-                        .entry(hash)
-                        .or_default()
-                        .push(test.name.clone());
-                }
-            }
-        }
-        let mut reported = std::collections::HashSet::new();
-        for (hash, names) in &schema_hashes {
-            if names.len() >= 2 && !reported.contains(hash) {
-                reported.insert(*hash);
-                let unique_names: std::collections::HashSet<&str> =
-                    names.iter().map(|n| n.as_str()).collect();
-                if unique_names.len() >= 2 {
-                    let test_names: Vec<&str> = unique_names.into_iter().collect();
-                    violations.push(make_violation(
-                        self.id(),
-                        self.name(),
-                        self.severity(),
-                        self.category(),
-                        format!(
-                            "Inline schema redeclared across {} tests: {} — extract to a fixture",
-                            test_names.len(),
-                            test_names.join(", ")
-                        ),
-                        module.file_path.clone(),
-                        1,
-                        Some("Extract shared test data into a fixture or conftest".to_string()),
-                        None,
-                    ));
-                }
-            }
-        }
-        violations
+        let schema_hashes = collect_schema_hashes(&module.test_functions, &module.source);
+        build_schema_violations(&schema_hashes, self, module)
     }
 }
