@@ -7,6 +7,14 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   merge-gate:
     name: Merge Gate
@@ -44,3 +52,36 @@ jobs:
         run: |
           uv run --directory python-wrapper pytest --cov --cov-branch --cov-fail-under=90 2>/dev/null || true
           cargo test --lib
+
+  sonarcloud:
+    name: SonarCloud Code Analysis
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install sonar-scanner
+        run: |
+          if ! command -v sonar-scanner &>/dev/null; then
+            brew install sonar-scanner
+          fi
+      - name: SonarCloud Scan
+        run: sonar-scanner -Dsonar.token=${{ secrets.SONAR_TOKEN }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  required-checks:
+    name: Required Checks (Merge)
+    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    needs: [merge-gate, sonarcloud]
+    if: always()
+    steps:
+      - name: Verify all checks passed
+        run: |
+          for JOB in ${{ join(needs.*.result, ' ') }}; do
+            if [ "$JOB" != "success" ]; then
+              echo "❌ Job failed or was skipped: $JOB"
+              exit 1
+            fi
+          done
+          echo "✅ All required checks passed"
