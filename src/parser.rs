@@ -282,43 +282,57 @@ impl PythonParser {
         (false, None)
     }
 
+    /// Count non-comma, non-punctuation elements in a list/tuple node.
+    fn count_list_or_tuple_elements(arg: tree_sitter::Node) -> (usize, bool) {
+        let mut elem_count = 0;
+        let mut elem_cursor = arg.walk();
+        let mut found_comma = false;
+        for elem in arg.children(&mut elem_cursor) {
+            match elem.kind() {
+                "," => {
+                    found_comma = true;
+                }
+                "(" | ")" | "[" | "]" | "comment" => {}
+                _ if !elem.is_extra() => {
+                    elem_count += 1;
+                }
+                _ => {}
+            }
+        }
+        (elem_count, found_comma)
+    }
+
+    /// Walk the argument_list children and find the second positional list/tuple argument,
+    /// counting its elements to determine parametrize cardinality.
+    fn count_values_in_argument_list(argument_list: tree_sitter::Node) -> Option<usize> {
+        let mut comma_count = 0;
+        let mut args_cursor = argument_list.walk();
+        for arg in argument_list.children(&mut args_cursor) {
+            if arg.kind() == "," {
+                comma_count += 1;
+                continue;
+            }
+            if comma_count >= 1 && (arg.kind() == "list" || arg.kind() == "tuple") {
+                let (elem_count, found_comma) = Self::count_list_or_tuple_elements(arg);
+                if elem_count == 0 && !found_comma {
+                    return Some(0);
+                }
+                return Some(elem_count.max(1));
+            }
+        }
+        None
+    }
+
     fn count_parametrize_args_ast(decorator_node: tree_sitter::Node) -> Option<usize> {
         let mut cursor = decorator_node.walk();
         for child in decorator_node.children(&mut cursor) {
-            if child.kind() == "call" {
-                let mut call_cursor = child.walk();
-                for call_child in child.children(&mut call_cursor) {
-                    if call_child.kind() == "argument_list" {
-                        let mut comma_count = 0;
-                        let mut args_cursor = call_child.walk();
-                        for arg in call_child.children(&mut args_cursor) {
-                            if arg.kind() == "," {
-                                comma_count += 1;
-                                continue;
-                            }
-                            if comma_count >= 1 && (arg.kind() == "list" || arg.kind() == "tuple") {
-                                let mut elem_count = 0;
-                                let mut elem_cursor = arg.walk();
-                                let mut found_comma = false;
-                                for elem in arg.children(&mut elem_cursor) {
-                                    match elem.kind() {
-                                        "," => {
-                                            found_comma = true;
-                                        }
-                                        "(" | ")" | "[" | "]" | "comment" => {}
-                                        _ if !elem.is_extra() => {
-                                            elem_count += 1;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                if elem_count == 0 && !found_comma {
-                                    return Some(0);
-                                }
-                                return Some(elem_count.max(1));
-                            }
-                        }
-                    }
+            if child.kind() != "call" {
+                continue;
+            }
+            let mut call_cursor = child.walk();
+            for call_child in child.children(&mut call_cursor) {
+                if call_child.kind() == "argument_list" {
+                    return Self::count_values_in_argument_list(call_child);
                 }
             }
         }
@@ -506,38 +520,61 @@ impl PythonParser {
         false
     }
 
+    /// Check if a call child is `len(...)` or `type(...)` — a suboptimal assertion pattern.
+    fn is_len_or_type_call(child: tree_sitter::Node, source: &[u8]) -> bool {
+        if child.kind() != "call" {
+            return false;
+        }
+        let func = child.child_by_field_name("function");
+        match func {
+            Some(f) => {
+                let name = Self::node_text(f, source);
+                name == "len" || name == "type"
+            }
+            None => false,
+        }
+    }
+
+    /// Check if a child is `not None` — a suboptimal assertion pattern.
+    fn is_not_none_check(child: tree_sitter::Node) -> bool {
+        if child.kind() != "not" {
+            return false;
+        }
+        let mut nc = child.walk();
+        let has_none = child.children(&mut nc).any(|inner| inner.kind() == "none");
+        has_none
+    }
+
+    /// Check if a `none` child is used with `==`, `!=`, or `not` (rather than `is`/`is not`).
+    fn is_suboptimal_none_comparison(
+        child: tree_sitter::Node,
+        expr: tree_sitter::Node,
+        source: &[u8],
+    ) -> bool {
+        if child.kind() != "none" {
+            return false;
+        }
+        let text = Self::node_text(expr, source);
+        text.contains("==") || text.contains("!=") || text.contains("not")
+    }
+
     fn is_suboptimal_assertion(expr: tree_sitter::Node, source: &[u8]) -> bool {
-        if expr.kind() == "comparison_operator" {
-            let mut cursor = expr.walk();
-            for child in expr.children(&mut cursor) {
-                if child.kind() == "is" || child.kind() == "is not" {
-                    return false;
-                }
-                if child.kind() == "call" {
-                    let func = child.child_by_field_name("function");
-                    if let Some(f) = func {
-                        let name = Self::node_text(f, source);
-                        if name == "len" || name == "type" {
-                            return true;
-                        }
-                    }
-                }
-                if child.kind() == "not" {
-                    let mut nc = child.walk();
-                    for inner in child.children(&mut nc) {
-                        if inner.kind() == "none" {
-                            return true;
-                        }
-                    }
-                }
-                if child.kind() == "none" {
-                    let text = Self::node_text(expr, source);
-                    // only consider it suboptimal if it's '== None' or '!= None', which is caught here
-                    // 'is not None' or 'is None' are returned false above.
-                    if text.contains("==") || text.contains("!=") || text.contains("not") {
-                        return true;
-                    }
-                }
+        if expr.kind() != "comparison_operator" {
+            return false;
+        }
+        let mut cursor = expr.walk();
+        for child in expr.children(&mut cursor) {
+            if child.kind() == "is" || child.kind() == "is not" {
+                return false;
+            }
+            if Self::is_len_or_type_call(child, source) {
+                return true;
+            }
+            if Self::is_not_none_check(child) {
+                return true;
+            }
+            if Self::is_suboptimal_none_comparison(child, expr, source) {
+                return true;
             }
         }
         false
@@ -565,44 +602,57 @@ impl PythonParser {
         all_values
     }
 
+    /// Find the second list/tuple argument in an argument_list (the values arg to parametrize).
+    /// If only one list/tuple exists, returns that one. Stops at the second match.
+    fn find_second_list_tuple_arg(argument_list: tree_sitter::Node) -> Option<tree_sitter::Node> {
+        let mut args_cursor = argument_list.walk();
+        let mut tuple_list_count = 0;
+        let mut last_found = None;
+        for arg in argument_list.children(&mut args_cursor) {
+            if arg.kind() == "list" || arg.kind() == "tuple" {
+                tuple_list_count += 1;
+                last_found = Some(arg);
+                if tuple_list_count == 2 {
+                    return last_found;
+                }
+            }
+        }
+        last_found
+    }
+
+    /// Extract string values from a list/tuple node (skipping punctuation).
+    fn extract_text_values_from_node(arg: tree_sitter::Node, source: &[u8]) -> Vec<String> {
+        let mut values = Vec::new();
+        let mut elem_cursor = arg.walk();
+        for elem in arg.children(&mut elem_cursor) {
+            match elem.kind() {
+                "," | "(" | ")" | "[" | "]" | "comment" => {}
+                _ if !elem.is_extra() => {
+                    values.push(Self::node_text(elem, source).trim().to_string());
+                }
+                _ => {}
+            }
+        }
+        values
+    }
+
     fn extract_values_from_decorator_node(
         decorator_node: tree_sitter::Node,
         source: &[u8],
     ) -> Option<Vec<String>> {
         let mut cursor = decorator_node.walk();
         for child in decorator_node.children(&mut cursor) {
-            if child.kind() == "call" {
-                let mut call_cursor = child.walk();
-                for call_child in child.children(&mut call_cursor) {
-                    if call_child.kind() == "argument_list" {
-                        let mut args_cursor = call_child.walk();
-                        let mut target_arg = None;
-                        let mut tuple_list_count = 0;
-                        for arg in call_child.children(&mut args_cursor) {
-                            if arg.kind() == "list" || arg.kind() == "tuple" {
-                                tuple_list_count += 1;
-                                target_arg = Some(arg);
-                                if tuple_list_count == 2 {
-                                    break;
-                                }
-                            }
-                        }
-                        if let Some(arg) = target_arg {
-                            let mut values = Vec::new();
-                            let mut elem_cursor = arg.walk();
-                            for elem in arg.children(&mut elem_cursor) {
-                                match elem.kind() {
-                                    "," | "(" | ")" | "[" | "]" | "comment" => {}
-                                    _ if !elem.is_extra() => {
-                                        values
-                                            .push(Self::node_text(elem, source).trim().to_string());
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            return Some(values);
-                        }
-                    }
+            if child.kind() != "call" {
+                continue;
+            }
+            let mut call_cursor = child.walk();
+            for call_child in child.children(&mut call_cursor) {
+                if call_child.kind() != "argument_list" {
+                    continue;
+                }
+                let target_arg = Self::find_second_list_tuple_arg(call_child);
+                if let Some(arg) = target_arg {
+                    return Some(Self::extract_text_values_from_node(arg, source));
                 }
             }
         }
@@ -613,27 +663,37 @@ impl PythonParser {
         body.is_some_and(|b| Self::has_cwd_call(*b, source))
     }
 
-    fn has_cwd_call(node: tree_sitter::Node, source: &[u8]) -> bool {
-        if node.kind() == "call" {
-            let func = node.child_by_field_name("function");
-            if let Some(f) = func {
-                let text = Self::node_text(f, source);
-                if text == "os.getcwd" || text == "os.chdir" || text == "Path.cwd" {
+    /// Check if a single call node refers to a `getcwd` or `chdir` function.
+    fn is_cwd_call_node(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if node.kind() != "call" {
+            return false;
+        }
+        let func = match node.child_by_field_name("function") {
+            Some(f) => f,
+            None => return false,
+        };
+        let text = Self::node_text(func, source);
+        if text == "os.getcwd" || text == "os.chdir" || text == "Path.cwd" {
+            return true;
+        }
+        if text.contains("getcwd") || text.contains("chdir") {
+            return true;
+        }
+        if func.kind() == "attribute" {
+            let attr = func.child_by_field_name("attribute");
+            if let Some(a) = attr {
+                let name = Self::node_text(a, source);
+                if name == "getcwd" || name == "chdir" {
                     return true;
-                }
-                if text.contains("getcwd") || text.contains("chdir") {
-                    return true;
-                }
-                if f.kind() == "attribute" {
-                    let attr = f.child_by_field_name("attribute");
-                    if let Some(a) = attr {
-                        let name = Self::node_text(a, source);
-                        if name == "getcwd" || name == "chdir" {
-                            return true;
-                        }
-                    }
                 }
             }
+        }
+        false
+    }
+
+    fn has_cwd_call(node: tree_sitter::Node, source: &[u8]) -> bool {
+        if Self::is_cwd_call_node(node, source) {
+            return true;
         }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {

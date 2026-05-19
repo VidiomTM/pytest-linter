@@ -20,11 +20,14 @@ jobs:
     name: Merge Gate
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
     if: github.event.pull_request == null || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      PATH: /Users/jonathangadeaharder/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: clippy, rustfmt
+      - name: Setup stable Rust toolchain
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install uv
         run: |
@@ -35,23 +38,23 @@ jobs:
       - name: Format check
         run: |
           uvx ruff format --check . 2>/dev/null || true
-          cargo fmt --check
+          cargo +stable fmt --all -- --check
       - name: Lint
         run: |
           uvx ruff check . 2>/dev/null || true
-          cargo clippy -- -D warnings
+          cargo +stable clippy --workspace --all-targets -- -D warnings
       - name: TypeCheck
         run: |
           uvx pyright 2>/dev/null || true
-          cargo check
+          cargo +stable check
       - name: Build
         run: |
           uv build --directory python-wrapper 2>/dev/null || true
-          cargo build
+          cargo +stable build
       - name: Unit tests
         run: |
           uv run --directory python-wrapper pytest --cov --cov-branch --cov-fail-under=90 2>/dev/null || true
-          cargo test --lib
+          cargo +stable test --lib
 
   sonarcloud:
     name: SonarCloud Code Analysis
