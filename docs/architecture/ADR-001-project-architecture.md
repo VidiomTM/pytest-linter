@@ -2,10 +2,10 @@
 id: ADR-001
 kind: adr
 title: "Project Architecture"
-status: draft
+status: accepted
 date: 2026-05-17
-authors: []
-reviewers: []
+authors: [Jonathan Gadea Harder]
+reviewers: [Jonathan Gadea Harder]
 tags: []
 supersedes: []
 superseded_by: []
