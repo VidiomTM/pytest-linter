@@ -51,7 +51,7 @@ pytest-linter --check-baseline violations.json /path/to/tests
 | PYTEST-INF-003 | NonIdiomaticMonkeyPatchRule | Info |
 | PYTEST-INF-004 | MacOsCopyArtefactRule | Warning |
 
-**Maintenance (11):**
+**Maintenance (16):**
 
 | Rule ID | Name | Severity |
 |---------|------|----------|
@@ -83,7 +83,7 @@ pytest-linter --check-baseline violations.json /path/to/tests
 | PYTEST-MOC-004 | MockRatioBudgetRule | Info |
 | PYTEST-DBC-001 | NoContractHintRule | Info |
 
-**Fixtures (13):**
+**Fixtures (12):**
 
 | Rule ID | Name | Severity |
 |---------|------|----------|
