@@ -60,13 +60,18 @@ pytest-linter --format sarif --output results.sarif tests/
 Usage: pytest-linter [OPTIONS] <PATHS>...
 
 Arguments:
-  <PATHS>...  Files or directories to lint
+  <PATHS>...                     Files or directories to lint (required)
 
 Options:
   --format <FORMAT>           Output format: terminal, json, sarif [default: terminal]
   --output <OUTPUT>           Write output to file instead of stdout
   --memory-limit <MB>         Soft memory limit in MB [default: 256]
   --no-color                  Disable colored output
+  --incremental               Only lint files changed since --base
+  --base <BASE>               Git ref for incremental mode [default: HEAD]
+  --exclude <DIR>             Additional directory names to exclude (repeatable)
+  --baseline <FILE>           Save violations to baseline file
+  --check-baseline <FILE>     Compare against baseline, fail on new violations
   -h, --help                  Print help
 ```
 
@@ -76,19 +81,24 @@ Create a `[tool.pytest-linter]` section in `pyproject.toml`:
 
 ```toml
 [tool.pytest-linter]
-# Enable or disable specific rules
-rules = ["PYTEST-FLK-001", "PYTEST-BDD-001"]
-
 # Output format (terminal, json, sarif)
 format = "terminal"
 
 # Write output to a file
 output = ""
 
+# Additional directory names to exclude during file discovery
+excludes = ["generated", "vendor"]
+
 # Per-rule overrides
-[tool.pytest-linter.overrides.PYTEST-FLK-001]
+[tool.pytest-linter.rules.PYTEST-FLK-001]
+enabled = false
+
+[tool.pytest-linter.rules.PYTEST-MNT-004]
 severity = "warning"
 ```
+
+pytest-linter also supports a standalone `pytest-linter.toml` config file (flat structure, no `[tool]` prefix). Standalone config takes priority over `pyproject.toml`.
 
 ## Pre-commit Integration
 

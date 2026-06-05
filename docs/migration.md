@@ -33,8 +33,10 @@ pytest-fixture-no-parentheses = false
 **After** (`pyproject.toml`):
 ```toml
 [tool.pytest-linter]
-ignore = []
-min-severity = "warning"
+
+# Disable specific rules
+[tool.pytest-linter.rules.PYTEST-FLK-001]
+enabled = false
 ```
 
 Keep your flake8 config for style rules. pytest-linter doesn't replace style enforcement.
@@ -79,8 +81,9 @@ disable=W0612
 **After** (`pyproject.toml`):
 ```toml
 [tool.pytest-linter]
-ignore = ["PYTEST-FIX-005"]  # if you want to skip unused fixture
-min-severity = "warning"
+# Disable specific rules
+[tool.pytest-linter.rules.PYTEST-FIX-005]
+enabled = false
 ```
 
 ### Running Both
@@ -113,7 +116,9 @@ flake8-max-line-length = 120
 **After** (`pyproject.toml`):
 ```toml
 [tool.pytest-linter]
-min-severity = "warning"
+# Disable specific rules that don't apply
+[tool.pytest-linter.rules.PYTEST-FLK-001]
+enabled = false
 ```
 
 ### What You Gain
@@ -131,7 +136,7 @@ pytest-flake8 only ran standard flake8 checks. pytest-linter adds:
 - [ ] Install pytest-linter (`pip install pytest-linter` or download binary)
 - [ ] Add `[tool.pytest-linter]` config to `pyproject.toml`
 - [ ] Run `pytest-linter tests/` and review findings
-- [ ] Suppress false positives with `ignore` config
+- [ ] Suppress false positives with per-rule `enabled = false` config
 - [ ] Add to pre-commit hooks
 - [ ] Add to CI pipeline
 - [ ] Keep complementary tools (ruff, flake8-pytest-style) for style rules

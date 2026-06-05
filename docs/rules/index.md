@@ -1,6 +1,6 @@
 # Rules Overview
 
-pytest-linter includes **49 rules** across five categories.
+pytest-linter includes **49 rules** across four categories (Flakiness, Maintenance, Fixture, Enhancement), with Infrastructure as a documentation grouping for rules related to test infrastructure.
 
 ## Flakiness
 
@@ -17,10 +17,6 @@ pytest-linter includes **49 rules** across five categories.
 | [PYTEST-FLK-011](./PYTEST-FLK-011.md) | DatetimeInAssertionRule | Warning |
 | [PYTEST-XDIST-001](./PYTEST-XDIST-001.md) | XdistSharedStateRule | Warning |
 | [PYTEST-XDIST-002](./PYTEST-XDIST-002.md) | XdistFixtureIoRule | Warning |
-| [PYTEST-FLK-008](./PYTEST-FLK-008.md) | RandomWithoutSeedRule | Warning |
-| [PYTEST-FLK-009](./PYTEST-FLK-009.md) | SubprocessWithoutTimeoutRule | Warning |
-| [PYTEST-FLK-010](./PYTEST-FLK-010.md) | SocketWithoutBindTimeoutRule | Warning |
-| [PYTEST-FLK-011](./PYTEST-FLK-011.md) | DatetimeInAssertionRule | Warning |
 
 ## Infrastructure
 
@@ -48,19 +44,9 @@ pytest-linter includes **49 rules** across five categories.
 | [PYTEST-PARAM-001](./PYTEST-PARAM-001.md) | ParametrizeEmptyRule | Warning |
 | [PYTEST-PARAM-002](./PYTEST-PARAM-002.md) | ParametrizeDuplicateRule | Warning |
 | [PYTEST-PARAM-003](./PYTEST-PARAM-003.md) | ParametrizeExplosionRule | Warning |
-| [PYTEST-MNT-014](./PYTEST-MNT-014.md) | ConditionalLogicInTestRule | Warning |
-| [PYTEST-MNT-015](./PYTEST-MNT-015.md) | DuplicateTestBodiesRule | Info |
-| [PYTEST-MNT-016](./PYTEST-MNT-016.md) | SleepWithValueRule | Warning |
-| [PYTEST-MNT-017](./PYTEST-MNT-017.md) | TestNameLengthRule | Info |
-
-## Mocking
-
-| Rule ID | Name | Severity |
-|---------|------|----------|
 | [PYTEST-MOC-001](./PYTEST-MOC-001.md) | PatchTargetingDefinitionModuleRule | Warning |
 | [PYTEST-MOC-002](./PYTEST-MOC-002.md) | MagicMockOnAsyncRule | Error |
 | [PYTEST-MOC-003](./PYTEST-MOC-003.md) | PatchInitBypassRule | Warning |
-| [PYTEST-MOC-004](./PYTEST-MOC-004.md) | MockRatioBudgetRule | Info |
 
 ## Fixture
 
@@ -88,3 +74,4 @@ pytest-linter includes **49 rules** across five categories.
 | [PYTEST-PBT-001](./PYTEST-PBT-001.md) | PropertyTestHintRule | Info |
 | [PYTEST-DBC-001](./PYTEST-DBC-001.md) | NoContractHintRule | Info |
 | [PYTEST-VAL-001](./PYTEST-VAL-001.md) | InlineSchemaRedeclaredRule | Info |
+| [PYTEST-MOC-004](./PYTEST-MOC-004.md) | MockRatioBudgetRule | Info |

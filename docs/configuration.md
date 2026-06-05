@@ -1,6 +1,13 @@
 # Configuration
 
-pytest-linter is configured via `pyproject.toml` under the `[tool.pytest-linter]` section.
+pytest-linter is configured via `pyproject.toml` under the `[tool.pytest-linter]` section, or via a standalone `pytest-linter.toml` file.
+
+## Config File Priority
+
+1. CLI arguments (highest)
+2. `pytest-linter.toml` (standalone, walks up directories)
+3. `pyproject.toml` `[tool.pytest-linter]` (walks up directories)
+4. Built-in defaults
 
 ## Basic Options
 
@@ -12,11 +19,27 @@ format = "terminal"
 # Write output to a file (empty string = stdout)
 output = ""
 
-# Select specific rules to enable (empty = all)
-# Each rule is a table key with optional severity/enable overrides
-[tool.pytest-linter.rules]
-PYTEST-FLK-001 = {}
-PYTEST-MNT-004 = {}
+# Additional directory names to exclude during file discovery
+excludes = ["generated", "vendor"]
+
+# Per-rule overrides
+[tool.pytest-linter.rules.PYTEST-FLK-001]
+enabled = false
+
+[tool.pytest-linter.rules.PYTEST-MNT-004]
+severity = "warning"
+```
+
+## Standalone Config File
+
+A `pytest-linter.toml` file uses a flat structure (no `[tool]` prefix):
+
+```toml
+# pytest-linter.toml
+format = "json"
+
+[rules.PYTEST-FLK-001]
+enabled = false
 ```
 
 ## Per-Rule Overrides

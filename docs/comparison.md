@@ -36,10 +36,10 @@ How pytest-linter compares to other Python linting tools with pytest-specific ru
 | Conditional logic in tests | **PYTEST-MNT-001** | — | — | — |
 | Magic assertions | **PYTEST-MNT-002** | — | — | — |
 | Suboptimal assertions | **PYTEST-MNT-003** | — | — | — |
-| No assertions | **PYTEST-MNT-004** | F601 | — | — |
+| No assertions | **PYTEST-MNT-004** | — | — | — |
 | Mock-only verification | **PYTEST-MNT-005** | — | — | — |
 | Assertion roulette | **PYTEST-MNT-006** | — | — | — |
-| Raw try/except vs pytest.raises | **PYTEST-MNT-007** | PT011 | W0612 | PT011 |
+| Raw try/except vs pytest.raises | **PYTEST-MNT-007** | PT017 | — | PT017 |
 | Missing BDD scenario | **PYTEST-BDD-001** | — | — | — |
 | Property-based test hint | **PYTEST-PBT-001** | — | — | — |
 | Empty parametrize | **PYTEST-PARAM-001** | — | — | — |
