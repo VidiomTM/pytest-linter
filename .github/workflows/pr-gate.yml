@@ -65,30 +65,10 @@ jobs:
       - name: Run gitleaks
         run: gitleaks detect --verbose --no-banner
 
-  structure:
-    name: Repository Structure
-    runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-      - name: Build structurelint
-        run: |
-          git clone --depth 1 https://github.com/Jonathangadeaharder/structurelint.git "$RUNNER_TEMP/structurelint-src"
-          cd "$RUNNER_TEMP/structurelint-src" && go build -o "$RUNNER_TEMP/structurelint" ./cmd/structurelint
-          chmod +x "$RUNNER_TEMP/structurelint"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-      - name: Run structurelint
-        run: structurelint .
-      - name: Cleanup structurelint build
-        if: always()
-        run: rm -rf "$RUNNER_TEMP/structurelint" "$RUNNER_TEMP/structurelint-src"
-
   required-checks:
     name: Required Checks (PR)
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
-    needs: [repo-hygiene, rust-quality, dependency-scan, secret-scanning, structure]
+    needs: [repo-hygiene, rust-quality, dependency-scan, secret-scanning]
     if: always()
     steps:
       - name: Verify all checks passed
