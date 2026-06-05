@@ -89,7 +89,9 @@ impl Default for Config {
 }
 
 impl Config {
-    // 38 rule IDs enabled by default (matches the full rule registry)
+    // 39 rule IDs enabled by default in the config map.
+    // The full rule registry (all_rules()) has 49 rules; rules not in this
+    // list are treated as enabled-by-default by is_rule_enabled().
     fn default_rule_ids() -> Vec<&'static str> {
         vec![
             "PYTEST-FLK-001",

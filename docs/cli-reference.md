@@ -3,14 +3,14 @@
 ## Usage
 
 ```bash
-pytest-linter [OPTIONS] [PATHS]...
+pytest-linter [OPTIONS] <PATHS>...
 ```
 
 ## Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `[PATHS]...` | Yes | Files or directories to lint |
+| `<PATHS>...` | Yes | Files or directories to lint |
 
 ## Options
 
@@ -22,6 +22,7 @@ pytest-linter [OPTIONS] [PATHS]...
 | `--no-color` | off | Disable colored output |
 | `--incremental` | off | Only lint files changed since `--base` |
 | `--base <BASE>` | `HEAD` | Git ref for incremental mode |
+| `--exclude <DIR>` | — | Additional directory names to exclude (repeatable) |
 | `--baseline <FILE>` | — | Save violations to baseline file |
 | `--check-baseline <FILE>` | — | Compare against baseline, fail on new violations |
 | `-h`, `--help` | — | Print help |

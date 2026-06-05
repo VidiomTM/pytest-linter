@@ -26,7 +26,7 @@ pytest-linter --check-baseline violations.json /path/to/tests
 
 ## Rules (49)
 
-**Flakiness (7):**
+**Flakiness (11):**
 
 | Rule ID | Name | Severity |
 |---------|------|----------|
@@ -51,13 +51,12 @@ pytest-linter --check-baseline violations.json /path/to/tests
 | PYTEST-INF-003 | NonIdiomaticMonkeyPatchRule | Info |
 | PYTEST-INF-004 | MacOsCopyArtefactRule | Warning |
 
-**Maintenance (12):**
+**Maintenance (11):**
 
 | Rule ID | Name | Severity |
 |---------|------|----------|
 | PYTEST-MNT-001 | TestLogicRule | Warning |
 | PYTEST-MNT-002 | MagicAssertRule | Warning |
-| PYTEST-MNT-003 | SuboptimalAssertRule | Info |
 | PYTEST-MNT-004 | NoAssertionRule | Error |
 | PYTEST-MNT-005 | MockOnlyVerifyRule | Warning |
 | PYTEST-MNT-006 | AssertionRouletteRule | Warning |
@@ -66,18 +65,25 @@ pytest-linter --check-baseline violations.json /path/to/tests
 | PYTEST-MNT-015 | DuplicateTestBodiesRule | Info |
 | PYTEST-MNT-016 | SleepWithValueRule | Warning |
 | PYTEST-MNT-017 | TestNameLengthRule | Info |
-| PYTEST-VAL-001 | InlineSchemaRedeclaredRule | Info |
-| PYTEST-BDD-001 | BddMissingScenarioRule | Info |
-| PYTEST-PBT-001 | PropertyTestHintRule | Info |
 | PYTEST-PARAM-001 | ParametrizeEmptyRule | Warning |
 | PYTEST-PARAM-002 | ParametrizeDuplicateRule | Warning |
 | PYTEST-PARAM-003 | ParametrizeExplosionRule | Warning |
 | PYTEST-MOC-001 | PatchTargetingDefinitionModuleRule | Warning |
 | PYTEST-MOC-002 | MagicMockOnAsyncRule | Error |
 | PYTEST-MOC-003 | PatchInitBypassRule | Warning |
-| PYTEST-MOC-004 | MockRatioBudgetRule | Info |
 
-**Fixtures (9):**
+**Enhancement (6):**
+
+| Rule ID | Name | Severity |
+|---------|------|----------|
+| PYTEST-MNT-003 | SuboptimalAssertRule | Info |
+| PYTEST-VAL-001 | InlineSchemaRedeclaredRule | Info |
+| PYTEST-BDD-001 | BddMissingScenarioRule | Info |
+| PYTEST-PBT-001 | PropertyTestHintRule | Info |
+| PYTEST-MOC-004 | MockRatioBudgetRule | Info |
+| PYTEST-DBC-001 | NoContractHintRule | Info |
+
+**Fixtures (13):**
 
 | Rule ID | Name | Severity |
 |---------|------|----------|
@@ -93,22 +99,23 @@ pytest-linter --check-baseline violations.json /path/to/tests
 | PYTEST-FIX-011 | YieldWithoutTryFinallyRule | Warning |
 | PYTEST-FIX-012 | FixtureNameShadowsBuiltinRule | Warning |
 | PYTEST-FIX-013 | AutouseCascadeDepthRule | Warning |
-| PYTEST-DBC-001 | NoContractHintRule | Info |
 
 ## CLI Options
 
 ```
-Usage: pytest-linter [OPTIONS] [PATHS]...
+Usage: pytest-linter [OPTIONS] <PATHS>...
 
 Arguments:
-  [PATHS]...  Files or directories to lint
+  <PATHS>...                     Files or directories to lint (required)
 
 Options:
   --format <FORMAT>              Output format: terminal, json, sarif
   --output <OUTPUT>              Write output to file instead of stdout
+  --memory-limit <MB>            Soft memory limit in MB [default: 256]
   --no-color                     Disable colored output
   --incremental                  Only lint files changed since --base
   --base <BASE>                  Git ref for incremental mode [default: HEAD]
+  --exclude <DIR>                Additional directory names to exclude (repeatable)
   --baseline <FILE>              Save violations to baseline file
   --check-baseline <FILE>        Compare against baseline, fail on new violations
   -h, --help                     Print help
@@ -144,7 +151,7 @@ def test_something():  # noqa: PYTEST-FLK-001
 ## Architecture
 
 - **tree-sitter** for AST parsing (no regex)
-- **Rule trait** with `check(module, all_modules) -> Vec<Violation>`
+- **Rule trait** with `check(module, all_modules, ctx) -> Vec<Violation>`
 - **Engine** discovers test files, parses them, runs all rules
 - **CLI** via clap with terminal/JSON/SARIF output
 - **Parallel** file parsing and rule checking via rayon
@@ -188,6 +195,7 @@ vim.lsp.enable('pytest_linter')
   ]
 }
 ```
+
 ## License
 
 MIT
