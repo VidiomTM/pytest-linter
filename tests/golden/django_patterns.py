@@ -2,7 +2,6 @@
 # Each `# expect: RULE-ID` marks a line where the linter should report that rule.
 
 import time
-import requests
 
 import pytest
 

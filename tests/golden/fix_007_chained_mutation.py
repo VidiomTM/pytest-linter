@@ -18,6 +18,7 @@ def complex_obj():
         def __init__(self):
             self.data = {}
             self.tags = []
+
     return State()
 
 

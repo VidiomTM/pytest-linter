@@ -4,8 +4,6 @@
 import argparse
 import os
 import random
-import shutil
-import sys
 
 CLEAN_TEMPLATE = """\
 def test_{name}():
@@ -270,7 +268,7 @@ TEMPLATES = {
 TEMPLATE_KEYS = list(TEMPLATES.keys())
 
 
-def generate_file_content(rng: random.Random, idx: int) -> str:
+def generate_file_content(rng: random.Random, idx: int) -> str:  # noqa: PLR0912
     num_functions = rng.randint(1, 20)
     parts: list[str] = []
     seen_fixtures: set[str] = set()

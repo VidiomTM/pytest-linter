@@ -8,8 +8,9 @@
 # expect: PYTEST-MNT-005
 # test_uses_frozen and test_uses_int don't trigger FIX-006 but do trigger BDD-001/DBC-001
 
-import pytest
 from dataclasses import dataclass
+
+import pytest
 
 
 @pytest.fixture(scope="session")
@@ -26,6 +27,7 @@ class BrainState:
     def __init__(self):
         self.cache = {}
 
+
 @pytest.fixture(scope="session")
 def brain_state():
     state = BrainState()
@@ -35,6 +37,7 @@ def brain_state():
 @dataclass
 class NonFrozenConfig:
     key: str = "default"
+
 
 @pytest.fixture(scope="session")
 def non_frozen_config():
@@ -54,6 +57,7 @@ def session_int_fixture():
 @dataclass(frozen=True)
 class FrozenConfig:
     key: str = "default"
+
 
 @pytest.fixture(scope="session")
 def frozen_session_fixture():

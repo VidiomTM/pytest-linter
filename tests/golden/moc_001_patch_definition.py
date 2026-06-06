@@ -3,9 +3,9 @@
 # expect: PYTEST-BDD-001
 # expect: PYTEST-MNT-004
 
-from myapp.models import User
-from myapp.service import create_user
 from unittest.mock import patch
+
+from myapp.service import create_user
 
 
 @patch("myapp.models.User.save")
