@@ -14,6 +14,7 @@ jobs:
   build-binaries:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +90,7 @@ jobs:
   build-python-wrapper:
     name: Build PyPI package
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -117,6 +119,7 @@ jobs:
     name: Create GitHub Release
     needs: [build-binaries, build-python-wrapper]
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -151,6 +154,7 @@ jobs:
     name: Publish to PyPI
     needs: release
     runs-on: ["self-hosted", "macos", "arm64", "VidiomTM"]
+    timeout-minutes: 25
     environment:
       name: pypi
       url: https://pypi.org/project/pytest-linter/
