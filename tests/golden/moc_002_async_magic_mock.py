@@ -4,7 +4,6 @@
 # expect: PYTEST-MNT-004
 
 from unittest.mock import MagicMock
-import pytest
 
 
 async def test_async_with_magic_mock():

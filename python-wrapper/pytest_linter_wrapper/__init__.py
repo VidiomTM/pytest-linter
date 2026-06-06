@@ -1,5 +1,4 @@
 import hashlib
-import json
 import os
 import platform
 import stat
@@ -73,9 +72,7 @@ def _verify_checksum(filepath: Path, checksum_url: str) -> None:
     if len(parts) > 1:
         checksum_filename = parts[1].lstrip("*")
         if checksum_filename != filepath.name:
-            raise RuntimeError(
-                f"Checksum filename mismatch: expected {filepath.name!r}, got {checksum_filename!r}"
-            )
+            raise RuntimeError(f"Checksum filename mismatch: expected {filepath.name!r}, got {checksum_filename!r}")
 
     sha256 = hashlib.sha256(filepath.read_bytes()).hexdigest()
     if sha256 != expected_hash:
@@ -124,7 +121,7 @@ def install_binary() -> Path:
 
 def main() -> None:
     binary = install_binary()
-    result = subprocess.run([str(binary)] + sys.argv[1:])
+    result = subprocess.run([str(binary)] + sys.argv[1:], check=False)
     sys.exit(result.returncode)
 
 

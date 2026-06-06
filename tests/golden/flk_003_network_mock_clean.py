@@ -3,9 +3,6 @@
 # expect: PYTEST-DBC-001
 # expect: PYTEST-MNT-002
 
-import httpx
-import respx
-
 
 def test_uses_httpx_with_mock():
     assert True

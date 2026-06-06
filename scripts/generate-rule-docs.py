@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Generate per-rule documentation pages from Rust source code."""
 
-import re
-import os
 from pathlib import Path
 
 RULES = [
@@ -610,32 +608,28 @@ RULES = [
 
 
 def generate_rule_page(rule: dict) -> str:
-    bad_examples = "\n".join(
-        f"```python\n{ex}\n```" for ex in rule["bad"]
-    )
-    good_examples = "\n".join(
-        f"```python\n{ex}\n```" for ex in rule["good"]
-    )
-    return f"""# {rule['id']} — {rule['name']}
+    bad_examples = "\n".join(f"```python\n{ex}\n```" for ex in rule["bad"])
+    good_examples = "\n".join(f"```python\n{ex}\n```" for ex in rule["good"])
+    return f"""# {rule["id"]} — {rule["name"]}
 
 | Property | Value |
 |----------|-------|
-| **ID** | `{rule['id']}` |
-| **Name** | {rule['name']} |
-| **Severity** | {rule['severity']} |
-| **Category** | {rule['category']} |
+| **ID** | `{rule["id"]}` |
+| **Name** | {rule["name"]} |
+| **Severity** | {rule["severity"]} |
+| **Category** | {rule["category"]} |
 
 ## Message
 
-> {rule['message']}
+> {rule["message"]}
 
 ## Rationale
 
-{rule['rationale']}
+{rule["rationale"]}
 
 ## Suggestion
 
-{rule['suggestion']}
+{rule["suggestion"]}
 
 ## Examples
 

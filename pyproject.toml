@@ -15,6 +15,14 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "ARG", "PL"]
 
+[tool.ruff.lint.per-file-ignores]
+# Golden test files intentionally contain anti-patterns for the linter to detect
+"tests/golden/*.py" = ["F821", "PLR2004", "PLR0133", "SIM105", "SIM115", "E721", "B011", "B018", "PLC0415"]
+# Script generates docs with embedded code examples as long string literals
+"scripts/generate-rule-docs.py" = ["E501"]
+# Wrapper: imports inside function for lazy dependency resolution
+"python-wrapper/pytest_linter_wrapper/__init__.py" = ["PLC0415"]
+
 [tool.pyright]
 include = ["python-wrapper"]
 venvPath = "."

@@ -6,12 +6,14 @@
 # expect: PYTEST-MNT-002
 
 import asyncio
+
 import anyio
 import pytest
 
 
 def test_time_sleep():
     import time
+
     time.sleep(2)
     assert True
 
@@ -33,6 +35,7 @@ def test_anyio_sleep():
 
 def test_sleep_zero():
     import time
+
     time.sleep(0)
     assert True
 
